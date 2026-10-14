@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lunar Cafe
 
-## Getting Started
+End-to-end cafe platform for **Lunar Cafe** (Jubilee Hills, Hyderabad): public website, QR table ordering with group codes, staff roles, kitchen board, billing, loyalty, reservations, and owner stats.
 
-First, run the development server:
+## Quick start
 
 ```bash
+cd C:\Users\admin\lunar-cafe
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Demo logins
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Role | Email | Password |
+|------|-------|----------|
+| Owner | owner@lunar.cafe | owner123 |
+| Reception | reception@lunar.cafe | reception123 |
+| Waiter | waiter1@lunar.cafe | waiter123 |
+| Kitchen | kitchen@lunar.cafe | kitchen123 |
 
-## Learn More
+## Try ordering
 
-To learn more about Next.js, take a look at the following resources:
+1. Open `/t/lunar-I1` on phone A → become host (note group code)
+2. Open `/t/lunar-I1` on phone B → enter group code
+3. Add items → Place order
+4. Staff → Approvals → approve → Kitchen board
+5. Reception → Bills → pay / print thermal layout
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Key routes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `/` public home
+- `/menu` menu without prices
+- `/reserve` `/loyalty` `/feedback` `/contact`
+- `/t/[tableId]` QR join
+- `/order/[sessionId]` live ordering
+- `/staff` staff console
+- `/staff/bill/[sessionId]` digital + thermal print bill
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See `ARCHITECTURE.md` for the frozen blueprint.
