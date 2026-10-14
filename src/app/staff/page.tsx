@@ -214,6 +214,7 @@ export default function StaffDashboard() {
   }
 
   async function saveStaffMember() {
+    if (!user) return;
     if (staffBusy) return;
     setStaffNotice("");
     setStaffBusy(true);
@@ -262,6 +263,7 @@ export default function StaffDashboard() {
   }
 
   async function removeStaffMember(staffId: string, name: string) {
+    if (!user) return;
     if (!window.confirm(`Delete ${name}? They will no longer be able to sign in.`)) return;
     const res = await fetch("/api/staff/action", {
       method: "POST",
@@ -319,6 +321,7 @@ export default function StaffDashboard() {
   }
 
   async function saveTable() {
+    if (!user) return;
     if (tableBusy) return;
     setTableNotice("");
     setTableBusy(true);
@@ -363,6 +366,7 @@ export default function StaffDashboard() {
   }
 
   async function removeTable(tableId: string, label: string) {
+    if (!user) return;
     if (!window.confirm(`Delete ${label}? QR codes for this table will stop working.`)) return;
     const res = await fetch("/api/staff/action", {
       method: "POST",
@@ -432,6 +436,7 @@ export default function StaffDashboard() {
   }
 
   async function saveMenuItem() {
+    if (!user) return;
     if (menuBusy) return;
     setMenuNotice("");
     setMenuBusy(true);
@@ -473,6 +478,7 @@ export default function StaffDashboard() {
   }
 
   async function removeMenuItem(id: string, name: string) {
+    if (!user) return;
     if (!window.confirm(`Delete ${name} from the menu?`)) return;
     const res = await fetch("/api/staff/action", {
       method: "POST",

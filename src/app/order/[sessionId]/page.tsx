@@ -350,7 +350,9 @@ export default function OrderPage({
     );
   }
 
-  const showHistory = isHost && (data.hostVisits?.length ?? 0) > 0;
+  // Local const so nested render helpers keep a narrowed Payload (useState can change).
+  const live = data;
+  const showHistory = isHost && (live.hostVisits?.length ?? 0) > 0;
 
   function renderHistoryPanel() {
     if (!showHistory) return null;
@@ -364,7 +366,7 @@ export default function OrderPage({
           Past visits — tap + on any dish to add it to the shared cart.
         </p>
         <div className="visit-list">
-          {data.hostVisits!.map((visit) => {
+          {live.hostVisits!.map((visit) => {
             const open = openVisitId === visit.sessionId;
             return (
               <div key={visit.sessionId} className={clsx("visit-row", open && "visit-row-open")}>
@@ -387,7 +389,7 @@ export default function OrderPage({
                   <div className="visit-detail">
                     {visit.items.map((item, i) => {
                       const key = `${visit.sessionId}-${i}`;
-                      const menuItem = data.menu.find((m) => m.id === item.menuItemId);
+                      const menuItem = live.menu.find((m) => m.id === item.menuItemId);
                       const available = Boolean(menuItem?.available);
                       const src =
                         menuItem?.image ||
@@ -447,13 +449,13 @@ export default function OrderPage({
               {cartCount} item{cartCount === 1 ? "" : "s"}
             </span>
           </div>
-          {data.session.cart.length === 0 && (
+          {live.session.cart.length === 0 && (
             <p className="muted" style={{ fontSize: "0.9rem" }}>
               Nothing here yet. Everyone at the table can add dishes.
             </p>
           )}
-          {data.session.cart.map((c) => {
-            const who = data.session.members.find((m) => m.id === c.addedByMemberId);
+          {live.session.cart.map((c) => {
+            const who = live.session.members.find((m) => m.id === c.addedByMemberId);
             return (
               <div key={c.id} className="list-row">
                 <div style={{ minWidth: 0 }}>
@@ -482,17 +484,17 @@ export default function OrderPage({
             );
           })}
           <div style={{ marginTop: "1rem" }}>
-            {data.ordering && !data.ordering.acceptingOrders && (
+            {live.ordering && !live.ordering.acceptingOrders && (
               <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.7rem" }}>
-                {data.ordering.reason || "Cafe is not accepting new orders right now."}
+                {live.ordering.reason || "Cafe is not accepting new orders right now."}
               </p>
             )}
             <NeoButton
               className="w-full"
               disabled={
-                !data.session.cart.length ||
+                !live.session.cart.length ||
                 !memberId ||
-                Boolean(data.ordering && !data.ordering.acceptingOrders)
+                Boolean(live.ordering && !live.ordering.acceptingOrders)
               }
               onClick={placeOrder}
             >
@@ -506,30 +508,30 @@ export default function OrderPage({
             <Receipt size={18} style={{ display: "inline", marginRight: 6 }} />
             Running bill
           </h3>
-          <div className="bill-row"><span>Subtotal</span><span>{money(data.bill.subtotal)}</span></div>
-          {data.bill.discountValue > 0 && (
-            <div className="bill-row"><span>Discount</span><span>- {money(data.bill.discountValue)}</span></div>
+          <div className="bill-row"><span>Subtotal</span><span>{money(live.bill.subtotal)}</span></div>
+          {live.bill.discountValue > 0 && (
+            <div className="bill-row"><span>Discount</span><span>- {money(live.bill.discountValue)}</span></div>
           )}
-          {data.session.serviceChargeEnabled && (
-            <div className="bill-row"><span>Service charge (5%)</span><span>{money(data.bill.serviceCharge)}</span></div>
+          {live.session.serviceChargeEnabled && (
+            <div className="bill-row"><span>Service charge (5%)</span><span>{money(live.bill.serviceCharge)}</span></div>
           )}
-          <div className="bill-row"><span>CGST 2.5%</span><span>{money(data.bill.cgst)}</span></div>
-          <div className="bill-row"><span>SGST 2.5%</span><span>{money(data.bill.sgst)}</span></div>
-          <div className="bill-row"><span>Round off</span><span>{money(data.bill.roundOff)}</span></div>
-        <div className="bill-total"><span>Total</span><span>{money(data.bill.grandTotal)}</span></div>
-        {data.session.billNumber && (
+          <div className="bill-row"><span>CGST 2.5%</span><span>{money(live.bill.cgst)}</span></div>
+          <div className="bill-row"><span>SGST 2.5%</span><span>{money(live.bill.sgst)}</span></div>
+          <div className="bill-row"><span>Round off</span><span>{money(live.bill.roundOff)}</span></div>
+        <div className="bill-total"><span>Total</span><span>{money(live.bill.grandTotal)}</span></div>
+        {live.session.billNumber && (
           <p className="muted" style={{ margin: "0.45rem 0 0", fontSize: "0.8rem" }}>
-            Bill No. {data.session.billNumber}
+            Bill No. {live.session.billNumber}
           </p>
         )}
         <p className="muted" style={{ margin: "0.55rem 0 0", fontSize: "0.78rem" }}>
           Only accepted orders are billed. Items still waiting for the waiter stay off the bill.
         </p>
-        {data.session.paymentAwaitingApproval ? (
+        {live.session.paymentAwaitingApproval ? (
           <p className="bill-requested-note">
             Payment submitted. Reception or the owner will confirm and close your table.
           </p>
-        ) : data.session.billGeneratedAt ? (
+        ) : live.session.billGeneratedAt ? (
           <div style={{ marginTop: "0.9rem", display: "grid", gap: "0.55rem" }}>
             <p className="bill-requested-note" style={{ margin: 0 }}>
               Your bill is ready. Pay by UPI QR, then wait for staff approval.
@@ -538,11 +540,11 @@ export default function OrderPage({
               <Smartphone size={16} /> Make payment
             </NeoButton>
           </div>
-        ) : data.session.billRequestedAt ? (
+        ) : live.session.billRequestedAt ? (
           <p className="bill-requested-note">
             Bill requested
-            {data.session.billRequestedByName
-              ? ` by ${data.session.billRequestedByName}`
+            {live.session.billRequestedByName
+              ? ` by ${live.session.billRequestedByName}`
               : ""}
             . Reception will apply any discount or loyalty, then generate the bill.
           </p>
@@ -562,10 +564,10 @@ export default function OrderPage({
 
         <div className="neo-card">
           <h3 className="h-display h-md" style={{ marginBottom: "0.4rem" }}>Your orders</h3>
-          {data.session.orders.length === 0 && (
+          {live.session.orders.length === 0 && (
             <p className="muted" style={{ fontSize: "0.9rem" }}>No orders placed yet.</p>
           )}
-          {data.session.orders.map((o) => (
+          {live.session.orders.map((o) => (
             <OrderRow key={o.id} order={o} />
           ))}
         </div>
