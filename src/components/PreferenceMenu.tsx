@@ -4,19 +4,13 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
-import { Check, Monitor, Moon, SlidersHorizontal, Sun, X } from "lucide-react";
-import { type ThemeMode, usePrefs } from "./Providers";
+import { Check, SlidersHorizontal, X } from "lucide-react";
+import { usePrefs } from "./Providers";
 import { CURRENCIES, LOCALES } from "@/lib/cafe";
 import type { Locale } from "@/lib/i18n";
 
-const THEMES: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
-  { id: "light", label: "Light", icon: <Sun size={16} /> },
-  { id: "dark", label: "Dark", icon: <Moon size={16} /> },
-  { id: "auto", label: "Auto", icon: <Monitor size={16} /> },
-];
-
 export function PreferenceMenu({ compact = false }: { compact?: boolean }) {
-  const { locale, setLocale, currency, setCurrency, theme, setTheme } = usePrefs();
+  const { locale, setLocale, currency, setCurrency } = usePrefs();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -97,21 +91,6 @@ export function PreferenceMenu({ compact = false }: { compact?: boolean }) {
               Prices are shown in your selected currency for reference. Bills at the
               cafe are always charged in ₹.
             </p>
-
-            <h6 className="pref-title">Appearance</h6>
-            <div className="pref-seg" role="radiogroup" aria-label="Appearance">
-              {THEMES.map((m) => (
-                <button
-                  key={m.id}
-                  role="radio"
-                  aria-checked={theme === m.id}
-                  className={clsx("pref-seg-btn", theme === m.id && "on")}
-                  onClick={() => setTheme(m.id)}
-                >
-                  {m.icon} {m.label}
-                </button>
-              ))}
-            </div>
           </motion.div>
         </>
       )}

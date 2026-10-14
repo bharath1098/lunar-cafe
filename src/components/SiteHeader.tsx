@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { usePrefs } from "./Providers";
 import { PreferenceMenu } from "./PreferenceMenu";
-import { ThemeToggle } from "./ThemeToggle";
 import { CAFE } from "@/lib/cafe";
 import { CAFE_MEDIA } from "@/lib/media";
 
@@ -77,7 +76,6 @@ export function SiteHeader() {
           </nav>
 
           <div className="header-tools">
-            <ThemeToggle />
             <PreferenceMenu />
             <Link href="/reserve" className="btn btn-gold btn-sm">
               {tr.reserve}

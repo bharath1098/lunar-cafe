@@ -1,4 +1,4 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 
 /* =========================================================
    LUNAR CAFE â€” design system
@@ -1418,6 +1418,19 @@ h4 {
     linear-gradient(180deg, #03141c 0%, #06292b 60%, var(--cream-100) 100%);
 }
 
+/* Moon-phase darkness: full moon (--lit: 1) = untouched sky; new moon = deep dark sky.
+   A faint pool of moonlight stays near the moon so it still looks magical. */
+.sky-dim {
+  opacity: 0;
+  transition: none;
+  background:
+    radial-gradient(ellipse at 80% 16%, rgba(3, 18, 24, 0.35) 0%, transparent 38%),
+    linear-gradient(180deg, rgba(1, 9, 14, 0.78) 0%, rgba(2, 14, 18, 0.7) 60%, rgba(2, 14, 18, 0.45) 100%);
+}
+[data-theme="dark"] .sky-dim {
+  opacity: calc((1 - var(--lit)) * 1.05);
+}
+
 [data-theme="dark"] .sky-day {
   opacity: 0;
 }
@@ -1573,6 +1586,195 @@ h4 {
   }
 }
 
+.shooting-star.s3 {
+  top: 8%;
+  left: 74%;
+  width: 110px;
+  animation-duration: 18s;
+  animation-delay: 8s;
+}
+.shooting-star.s4 {
+  top: 44%;
+  left: 62%;
+  width: 70px;
+  animation-duration: 26s;
+  animation-delay: 17s;
+}
+
+/* bright stars get a slow sparkle */
+.sky-stars i.star-bright {
+  animation-name: sparkle;
+  box-shadow:
+    0 0 8px 2px rgba(255, 255, 255, 0.7),
+    0 0 18px 4px rgba(190, 240, 225, 0.35);
+}
+@keyframes sparkle {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.7) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.5) rotate(45deg);
+  }
+}
+
+/* ---- aurora (night) ---- */
+.sky-aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 2s ease;
+  mix-blend-mode: screen;
+}
+[data-theme="dark"] .sky-aurora {
+  opacity: calc(0.35 + var(--lit) * 0.65);
+}
+.aurora {
+  position: absolute;
+  left: -20%;
+  width: 70%;
+  height: 38%;
+  border-radius: 50%;
+  filter: blur(46px);
+  opacity: 0.55;
+}
+.aurora.a1 {
+  top: 4%;
+  background: linear-gradient(90deg, transparent, rgba(60, 220, 180, 0.38), rgba(120, 240, 210, 0.2), transparent);
+  animation: aurora-drift 26s ease-in-out infinite alternate;
+}
+.aurora.a2 {
+  top: 16%;
+  left: 10%;
+  height: 30%;
+  background: linear-gradient(90deg, transparent, rgba(80, 170, 255, 0.22), rgba(90, 230, 200, 0.28), transparent);
+  animation: aurora-drift 34s ease-in-out infinite alternate-reverse;
+}
+.aurora.a3 {
+  top: 26%;
+  left: 30%;
+  width: 60%;
+  height: 24%;
+  background: linear-gradient(90deg, transparent, rgba(170, 120, 255, 0.14), rgba(100, 240, 200, 0.2), transparent);
+  animation: aurora-drift 42s ease-in-out infinite alternate;
+}
+@keyframes aurora-drift {
+  0% {
+    transform: translateX(-8%) skewX(-10deg) scaleY(0.85);
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateX(34%) skewX(12deg) scaleY(1.2);
+    opacity: 0.35;
+  }
+}
+
+/* ---- moonlit mist (night) ---- */
+.sky-mist {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 2s ease;
+}
+[data-theme="dark"] .sky-mist {
+  opacity: 1;
+}
+.mist {
+  position: absolute;
+  left: -50%;
+  width: 60%;
+  height: 22%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(170, 225, 215, 0.16), transparent 70%);
+  filter: blur(26px);
+  animation: cloud-drift linear infinite;
+}
+.mist.m1 {
+  top: 46%;
+  animation-duration: 120s;
+  animation-delay: -30s;
+}
+.mist.m2 {
+  top: 66%;
+  width: 80%;
+  height: 26%;
+  animation-duration: 160s;
+  animation-delay: -90s;
+}
+.mist.m3 {
+  top: 28%;
+  width: 45%;
+  height: 16%;
+  opacity: 0.8;
+  animation-duration: 95s;
+  animation-delay: -10s;
+}
+
+/* ---- fireflies (night) ---- */
+.sky-fireflies {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 2s ease 0.6s;
+}
+[data-theme="dark"] .sky-fireflies {
+  opacity: 1;
+}
+.sky-fireflies span {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff9d6 0%, #b9f2dc 45%, transparent 72%);
+  box-shadow: 0 0 8px 2px rgba(190, 245, 220, 0.4);
+  opacity: 0;
+  animation: firefly ease-in-out infinite;
+}
+@keyframes firefly {
+  0% {
+    transform: translate(0, 0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.95;
+  }
+  35% {
+    transform: translate(calc(var(--dx) * 0.4), calc(var(--dy) * 0.35)) scale(1);
+    opacity: 0.35;
+  }
+  55% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.6);
+    opacity: 0;
+  }
+}
+
+/* moon glow gently breathes */
+.moon-halo-wrap {
+  animation: halo-breathe 7s ease-in-out infinite;
+}
+@keyframes halo-breathe {
+  0%,
+  100% {
+    transform: scale(0.96);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
 /* ---- clouds (day) ---- */
 .sky-clouds {
   position: absolute;
@@ -1701,8 +1903,19 @@ h4 {
 
 @media (prefers-reduced-motion: reduce) {
   .petal,
-  .shooting-star {
+  .shooting-star,
+  .sky-fireflies,
+  .moon-halo-wrap {
+    animation: none;
+  }
+  .petal,
+  .shooting-star,
+  .sky-fireflies {
     display: none;
+  }
+  .aurora,
+  .mist {
+    animation: none;
   }
   .cloud {
     animation: none;

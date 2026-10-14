@@ -25,11 +25,9 @@ type Prefs = {
 
 const PrefsContext = createContext<Prefs | null>(null);
 
-function applyTheme(mode: ThemeMode) {
-  const dark =
-    mode === "dark" ||
-    (mode === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+// Light mode is retired: the site is always the night-sky (dark) theme.
+function applyTheme(_mode: ThemeMode) {
+  document.documentElement.dataset.theme = "dark";
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

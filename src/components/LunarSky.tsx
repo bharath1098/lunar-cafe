@@ -100,6 +100,19 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
     }));
   }, [variant]);
 
+  const fireflies = useMemo(() => {
+    const r = rng(53);
+    return Array.from({ length: variant === "hero" ? 6 : 3 }, () => ({
+      x: r() * 100,
+      y: 38 + r() * 56,
+      s: 3 + r() * 3,
+      d: -r() * 14,
+      t: 9 + r() * 10,
+      dx: (r() - 0.5) * 120,
+      dy: -(30 + r() * 90),
+    }));
+  }, [variant]);
+
   const petals = useMemo(() => {
     const r = rng(21);
     return Array.from({ length: variant === "hero" ? 14 : 8 }, () => ({
@@ -133,11 +146,21 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
     <div ref={rootRef} className={`lunar-sky lunar-sky-${variant}`} aria-hidden>
       <div className="sky-layer sky-day" />
       <div className="sky-layer sky-night" />
+      {/* deepens the night sky as the moon wanes / is covered; invisible at full moon */}
+      <div className="sky-layer sky-dim" />
+
+      {/* northern-lights style glow drifting across the night sky */}
+      <div className="sky-aurora">
+        <i className="aurora a1" />
+        <i className="aurora a2" />
+        <i className="aurora a3" />
+      </div>
 
       <div className="sky-stars">
         {stars.map((st, i) => (
           <i
             key={i}
+            className={st.s > 2.5 ? "star-bright" : undefined}
             style={{
               left: `${st.x}%`,
               top: `${st.y}%`,
@@ -150,6 +173,36 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
         ))}
         <b className="shooting-star" />
         <b className="shooting-star s2" />
+        <b className="shooting-star s3" />
+        <b className="shooting-star s4" />
+      </div>
+
+      {/* slow moonlit mist */}
+      <div className="sky-mist">
+        <i className="mist m1" />
+        <i className="mist m2" />
+        <i className="mist m3" />
+      </div>
+
+      {/* glowing fireflies floating up through the night */}
+      <div className="sky-fireflies">
+        {fireflies.map((f, i) => (
+          <span
+            key={i}
+            style={
+              {
+                left: `${f.x}%`,
+                top: `${f.y}%`,
+                width: f.s,
+                height: f.s,
+                animationDelay: `${f.d}s`,
+                animationDuration: `${f.t}s`,
+                "--dx": `${f.dx}px`,
+                "--dy": `${f.dy}px`,
+              } as React.CSSProperties
+            }
+          />
+        ))}
       </div>
 
       <div className="sky-clouds">{CLOUDS.filter((c) => !c.front).map(cloud)}</div>
