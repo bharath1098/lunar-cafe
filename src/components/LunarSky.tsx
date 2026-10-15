@@ -50,11 +50,16 @@ const CLOUDS = [
  *  - dark  : the same moon brightens, glows, stars fade in, shooting stars cross the sky
  * The moon slowly moves through its real phases, with a correctly curved terminator.
  */
-export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
+const SKY = {
+  hero: { stars: 58, fireflies: 6, petals: 14 },
+  page: { stars: 30, fireflies: 3, petals: 8 },
+  thin: { stars: 72, fireflies: 7, petals: 0 },
+} as const;
+
+export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" | "thin" }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const rootRef = useRef<HTMLDivElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
-
   const initial = useMemo(() => litPath(START_PHASE), []);
 
   useEffect(() => {
@@ -91,10 +96,11 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
 
   const stars = useMemo(() => {
     const r = rng(7);
-    return Array.from({ length: variant === "hero" ? 58 : 30 }, () => ({
+    const tall = variant === "thin";
+    return Array.from({ length: SKY[variant].stars }, () => ({
       x: r() * 100,
-      y: r() * 82,
-      s: 0.8 + r() * 2.2,
+      y: r() * (tall ? 100 : 82),
+      s: 0.7 + r() * (tall ? 1.8 : 2.2),
       d: r() * 6,
       t: 2.4 + r() * 4,
     }));
@@ -102,9 +108,9 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
 
   const fireflies = useMemo(() => {
     const r = rng(53);
-    return Array.from({ length: variant === "hero" ? 6 : 3 }, () => ({
+    return Array.from({ length: SKY[variant].fireflies }, () => ({
       x: r() * 100,
-      y: 38 + r() * 56,
+      y: variant === "thin" ? 8 + r() * 84 : 38 + r() * 56,
       s: 3 + r() * 3,
       d: -r() * 14,
       t: 9 + r() * 10,
@@ -115,7 +121,7 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
 
   const petals = useMemo(() => {
     const r = rng(21);
-    return Array.from({ length: variant === "hero" ? 14 : 8 }, () => ({
+    return Array.from({ length: SKY[variant].petals }, () => ({
       x: r() * 100,
       s: 9 + r() * 11,
       d: -r() * 18,
@@ -205,7 +211,9 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
         ))}
       </div>
 
-      <div className="sky-clouds">{CLOUDS.filter((c) => !c.front).map(cloud)}</div>
+      <div className="sky-clouds">
+        {CLOUDS.filter((c) => !c.front && (variant !== "thin" || c.w < 400)).map(cloud)}
+      </div>
 
       <div className="sky-moon">
         <div className="moon-halo-wrap">
@@ -268,11 +276,13 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
         </svg>
       </div>
 
-      <div className="sky-clouds sky-clouds-front">
-        {CLOUDS.filter((c) => c.front).map(cloud)}
-      </div>
+      {variant !== "thin" && (
+        <div className="sky-clouds sky-clouds-front">
+          {CLOUDS.filter((c) => c.front).map(cloud)}
+        </div>
+      )}
 
-      <div className="sky-petals">
+      {petals.length > 0 && <div className="sky-petals">
         {petals.map((p, i) => (
           <span
             key={i}
@@ -289,7 +299,7 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" }) {
             }
           />
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
 import {
+  ArrowUpRight,
   Clock,
   Menu as MenuIcon,
   Phone,
@@ -43,6 +44,10 @@ export function SiteHeader() {
     { href: "/contact", label: tr.contact },
   ];
 
+  // a link is active on its own page and on any page below it (/menu/cheese-omelette -> Menu)
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+
   return (
     <>
       <header className={clsx("site-header on-dark", scrolled && "scrolled")}>
@@ -68,7 +73,8 @@ export function SiteHeader() {
               <Link
                 key={l.href}
                 href={l.href}
-                className={clsx(pathname === l.href && "active")}
+                className={clsx(isActive(l.href) && "active")}
+                aria-current={isActive(l.href) ? "page" : undefined}
               >
                 {l.label}
               </Link>
@@ -119,11 +125,22 @@ export function SiteHeader() {
               </button>
             </div>
             {links.map((l) => (
-              <Link key={l.href} href={l.href}>
+              <Link
+                key={l.href}
+                href={l.href}
+                className={clsx(isActive(l.href) && "active")}
+                aria-current={isActive(l.href) ? "page" : undefined}
+              >
                 {l.label}
               </Link>
             ))}
-            <Link href="/feedback">{tr.feedback}</Link>
+            <Link
+              href="/feedback"
+              className={clsx(isActive("/feedback") && "active")}
+              aria-current={isActive("/feedback") ? "page" : undefined}
+            >
+              {tr.feedback}
+            </Link>
             <div style={{ marginTop: "1.2rem" }}>
               <PreferenceMenu />
             </div>
@@ -136,12 +153,28 @@ export function SiteHeader() {
 
 export function SiteFooter() {
   const { tr } = usePrefs();
+  const mapsHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(CAFE.mapsQuery)}`;
+  const telHref = `tel:${CAFE.phoneDisplay.replace(/\s/g, "")}`;
+  const explore = [
+    { href: "/menu", label: tr.menu },
+    { href: "/about", label: tr.about },
+    { href: "/gallery", label: tr.gallery },
+    { href: "/loyalty", label: tr.loyalty },
+    { href: "/feedback", label: tr.feedback },
+    { href: "/contact", label: tr.contact },
+  ];
+  const partners = [
+    { href: CAFE.zomatoUrl, label: "Zomato" },
+    { href: CAFE.swiggyUrl, label: "Swiggy" },
+    { href: CAFE.districtUrl, label: "District" },
+  ];
+
   return (
     <footer className="site-footer">
       <div className="wrap">
         <div className="footer-grid">
-          <div>
-            <div className="brand" style={{ marginBottom: "1rem" }}>
+          <div className="footer-brand">
+            <div className="brand">
               <span className="brand-mark">
                 <Image
                   src={CAFE_MEDIA.goldSign}
@@ -156,66 +189,106 @@ export function SiteFooter() {
                 <small>CAFE</small>
               </span>
             </div>
-            <p style={{ maxWidth: 280, lineHeight: 1.6 }}>{CAFE.tagline}</p>
+            <p className="footer-tagline">{CAFE.tagline}</p>
+            <div className="footer-cta">
+              <Link href="/reserve" className="footer-cta-btn is-primary">
+                {tr.bookTable}
+              </Link>
+              <a
+                href={mapsHref}
+                target="_blank"
+                rel="noreferrer"
+                className="footer-cta-btn"
+              >
+                Directions
+              </a>
+            </div>
           </div>
-          <div>
+
+          <nav className="footer-nav" aria-label="Explore">
             <h5>Explore</h5>
-            <Link href="/menu">{tr.menu}</Link>
-            <Link href="/gallery">{tr.gallery}</Link>
-            <Link href="/reserve">{tr.reserve}</Link>
-            <Link href="/loyalty">{tr.loyalty}</Link>
-            <Link href="/feedback">{tr.feedback}</Link>
-          </div>
-          <div>
+            <div className="footer-chips">
+              {explore.map((item) => (
+                <Link key={item.href} href={item.href}>
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          </nav>
+
+          <div className="footer-visit">
             <h5>Visit</h5>
-            <p>
-              <MapPin size={13} style={{ display: "inline", marginRight: 6 }} />
-              {CAFE.addressLines.join(", ")}
-            </p>
-            <p>
-              <Clock size={13} style={{ display: "inline", marginRight: 6 }} />
-              {CAFE.hours}
-            </p>
-            <p>
-              <Phone size={13} style={{ display: "inline", marginRight: 6 }} />
-              {CAFE.phoneDisplay}
-            </p>
+            <div className="footer-visit-list">
+              <a
+                className="footer-fact"
+                href={mapsHref}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span className="footer-ico">
+                  <MapPin size={15} />
+                </span>
+                <span>
+                  {CAFE.addressLines[0]}
+                  <small>{CAFE.addressLines[1]}</small>
+                </span>
+              </a>
+              <p className="footer-fact">
+                <span className="footer-ico">
+                  <Clock size={15} />
+                </span>
+                <span>
+                  Open daily
+                  <small>{CAFE.hours}</small>
+                </span>
+              </p>
+              <a className="footer-fact" href={telHref}>
+                <span className="footer-ico">
+                  <Phone size={15} />
+                </span>
+                <span>
+                  Call us
+                  <small>{CAFE.phoneDisplay}</small>
+                </span>
+              </a>
+            </div>
           </div>
-          <div>
+
+          <div className="footer-order">
             <h5>{tr.orderPartners}</h5>
-            <a href={CAFE.zomatoUrl} target="_blank" rel="noreferrer">
-              Zomato
-            </a>
-            <a href={CAFE.swiggyUrl} target="_blank" rel="noreferrer">
-              Swiggy
-            </a>
-            <a href={CAFE.districtUrl} target="_blank" rel="noreferrer">
-              District
-            </a>
-            <Link href="/staff/login" style={{ marginTop: "1rem" }}>
-              {tr.staff} login
-            </Link>
+            <div className="footer-chips is-partners">
+              {partners.map((item) => (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {item.label}
+                  <ArrowUpRight size={13} />
+                </a>
+              ))}
+            </div>
           </div>
         </div>
+
         <div className="footer-mark" aria-hidden>
           LUNAR
         </div>
-        <p
-          style={{
-            textAlign: "center",
-            fontSize: "0.75rem",
-            opacity: 0.55,
-            marginTop: "1.2rem",
-          }}
-        >
+        <p className="footer-legal">
           © {new Date().getFullYear()} Lunar Cafe · GSTIN {CAFE.gstin}
+          <span className="footer-legal-dot" aria-hidden>
+            ·
+          </span>
+          <Link href="/staff/login" className="footer-staff">
+            {tr.staff} login
+          </Link>
           <br />
           Moon photograph: Gregory H. Revera,{" "}
           <a
             href="https://creativecommons.org/licenses/by-sa/3.0/"
             target="_blank"
             rel="noreferrer"
-            style={{ display: "inline", textDecoration: "underline" }}
           >
             CC BY-SA 3.0
           </a>

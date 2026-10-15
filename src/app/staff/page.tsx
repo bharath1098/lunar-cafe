@@ -169,7 +169,7 @@ export default function StaffDashboard() {
 
   if (!user || !dash) {
     return (
-      <main style={{ minHeight: "100svh", display: "grid", placeItems: "center" }}>
+      <main style={{ minHeight: "calc(100 * var(--svh))", display: "grid", placeItems: "center" }}>
         <p className="muted">Loading staff console…</p>
       </main>
     );

@@ -31,12 +31,7 @@ export default function GalleryPage() {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={g.src} alt={g.title} loading="lazy" />
-              <span
-                className="neo-badge neo-badge-ink"
-                style={{ position: "absolute", left: 12, bottom: 12 }}
-              >
-                {g.title}
-              </span>
+              <span className="masonry-caption">{g.title}</span>
             </motion.button>
           ))}
         </div>

@@ -40,7 +40,16 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "document.documentElement.dataset.theme='dark'",
+              // theme + "same look on every screen": the design is laid out for a
+              // 1920 CSS px wide screen (B). Any screen at least M px wide is scaled
+              // proportionally to it (a 125% laptop = 1536px -> 0.8, a 4K screen -> 2),
+              // narrower ones (tablet / phone) keep the normal responsive layout.
+              // See --ui-zoom in globals.css.
+              "document.documentElement.dataset.theme='dark';" +
+              "(function(){var B=1920,M=1280,d=document.documentElement;" +
+              "function z(){var w=window.innerWidth,k=w>=M?Math.min(w/B,2.5):1;" +
+              "d.style.setProperty('--ui-zoom',k.toFixed(4))}" +
+              "z();window.addEventListener('resize',z)})()",
           }}
         />
       </head>

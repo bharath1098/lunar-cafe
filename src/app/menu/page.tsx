@@ -1,16 +1,17 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { QrCode, Search } from "lucide-react";
+import { LayoutGrid, List, Search } from "lucide-react";
 import clsx from "clsx";
-import { PageHero, PublicShell } from "@/components/PublicShell";
-import { Reveal } from "@/components/Reveal";
-import { usePrefs } from "@/components/Providers";
-import { CAFE_MEDIA, imageForMenuItem } from "@/lib/media";
+import { CategoryBar } from "@/components/CategoryBar";
+import { PublicShell } from "@/components/PublicShell";
+import { imageForMenuItem } from "@/lib/media";
 
 type PublicItem = {
   id: string;
+  slug: string;
   category: string;
   name: string;
   description: string;
@@ -22,17 +23,28 @@ type PublicItem = {
 };
 
 export default function MenuPage() {
-  const { tr } = usePrefs();
   const [items, setItems] = useState<PublicItem[]>([]);
   const [active, setActive] = useState("All");
   const [query, setQuery] = useState("");
   const [vegOnly, setVegOnly] = useState(false);
+  const [menuView, setMenuView] = useState<"card" | "present">("card");
+  const [moreCatsOpen, setMoreCatsOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/public")
       .then((r) => r.json())
       .then((d) => setItems(d.menu || []));
   }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("lunar-menu-view");
+    if (saved === "card" || saved === "present") setMenuView(saved);
+  }, []);
+
+  function chooseMenuView(next: "card" | "present") {
+    setMenuView(next);
+    localStorage.setItem("lunar-menu-view", next);
+  }
 
   const categories = useMemo(
     () => ["All", ...new Set(items.map((i) => i.category))],
@@ -52,109 +64,133 @@ export default function MenuPage() {
   }, [items, active, query, vegOnly]);
 
   const grouped = useMemo(() => {
+    const order = categories.filter((c) => c !== "All");
     const map = new Map<string, PublicItem[]>();
+    for (const cat of order) map.set(cat, []);
     for (const item of visible) {
       const list = map.get(item.category) || [];
       list.push(item);
       map.set(item.category, list);
     }
-    return [...map.entries()];
-  }, [visible]);
+    return [...map.entries()].filter(([, list]) => list.length > 0);
+  }, [visible, categories]);
+
+  function renderItem(item: PublicItem) {
+    const src = item.image || imageForMenuItem(item.name, item.category);
+    if (menuView === "card") {
+      return (
+        <Link
+          key={item.id}
+          href={`/menu/${item.slug}`}
+          className="order-menu-card"
+          aria-label={item.name}
+        >
+          <span className="order-menu-card-photo">
+            <Image src={src} alt="" fill className="cover" sizes="240px" />
+            {(item.isNew || item.isHighlighted || item.hasDiscount) && (
+              <span className="order-menu-card-tags">
+                {item.isNew && <span className="neo-badge neo-badge-gold">New</span>}
+                {item.isHighlighted && (
+                  <span className="neo-badge neo-badge-ink">Signature</span>
+                )}
+                {item.hasDiscount && <span className="neo-badge neo-badge-rose">Offer</span>}
+              </span>
+            )}
+          </span>
+          <span className="order-menu-card-body">
+            <strong>
+              <span className={clsx("veg-dot", !item.isVeg && "non")} />
+              <span className="order-menu-card-title">{item.name}</span>
+            </strong>
+            <small>{item.description || " "}</small>
+          </span>
+        </Link>
+      );
+    }
+    return (
+      <Link
+        key={item.id}
+        href={`/menu/${item.slug}`}
+        className="order-menu-row"
+        aria-label={item.name}
+      >
+        <span className="order-menu-thumb">
+          <Image src={src} alt="" fill className="cover" sizes="84px" />
+        </span>
+        <span className="order-menu-meta">
+          <strong>
+            <span className={clsx("veg-dot", !item.isVeg && "non")} style={{ marginRight: 6 }} />
+            {item.name}
+          </strong>
+          <span>
+            {item.isNew && <span className="neo-badge neo-badge-gold">New</span>}{" "}
+            {item.isHighlighted && <span className="neo-badge neo-badge-ink">Signature</span>}
+          </span>
+          {item.description && <small>{item.description}</small>}
+        </span>
+      </Link>
+    );
+  }
 
   return (
     <PublicShell>
-      <PageHero
-        eyebrow="Our menu"
-        title="Brewed with passion"
-        subtitle="From barista classics to chef-special bowls. Prices and ordering unlock when you scan your table QR."
-        image={CAFE_MEDIA.logoMug}
-      />
-
-      <section className="section" style={{ paddingTop: "1.5rem" }}>
+      <section className="section public-menu">
         <div className="wrap">
-          <div className="menu-toolbar">
-            <div style={{ display: "flex", gap: "0.7rem", flexWrap: "wrap" }}>
-              <label className="search-box" style={{ flex: "1 1 260px" }}>
+          <div className="public-menu-tools">
+            <div className="order-toolbar">
+              <label className="search-box">
                 <Search size={18} />
                 <input
-                  placeholder="Search dishes, drinks, ingredients…"
+                  placeholder="Search the menu…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
               </label>
               <button
-                className={clsx("chip", vegOnly && "chip-on")}
+                type="button"
+                className={clsx("chip veg-toggle", vegOnly && "chip-on")}
+                aria-pressed={vegOnly}
                 onClick={() => setVegOnly((v) => !v)}
               >
-                <span className="veg-dot" style={{ marginRight: 8 }} /> Veg only
+                <span className="veg-dot" aria-hidden />
+                Veg
               </button>
-            </div>
-            <div className="chip-row">
-              {categories.map((c) => (
+              <div className="view-switch" role="group" aria-label="Menu layout">
                 <button
-                  key={c}
-                  className={clsx("chip", active === c && "chip-on")}
-                  onClick={() => setActive(c)}
+                  type="button"
+                  className={clsx(menuView === "card" && "on")}
+                  aria-pressed={menuView === "card"}
+                  onClick={() => chooseMenuView("card")}
                 >
-                  {c}
+                  <LayoutGrid size={15} /> Card
                 </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="scan-banner" style={{ margin: "1rem 0 0" }}>
-            <QrCode size={26} color="#bdeadd" />
-            <div>
-              <strong>{tr.scanHint}</strong>
-              <div style={{ fontSize: "0.82rem", opacity: 0.75 }}>
-                Find the QR on your table at Lunar Cafe.
+                <button
+                  type="button"
+                  className={clsx(menuView === "present" && "on")}
+                  aria-pressed={menuView === "present"}
+                  onClick={() => chooseMenuView("present")}
+                >
+                  <List size={15} /> Present
+                </button>
               </div>
             </div>
+            <CategoryBar
+              categories={categories}
+              value={active}
+              moreOpen={moreCatsOpen}
+              onMoreOpenChange={setMoreCatsOpen}
+              onChange={(next) => {
+                setActive(next);
+                setMoreCatsOpen(false);
+              }}
+            />
           </div>
 
           {grouped.map(([cat, list]) => (
-            <section key={cat}>
+            <section key={cat} className="public-menu-group">
               <h2 className="menu-cat">{cat}</h2>
-              <div className="dish-grid">
-                {list.map((item, idx) => {
-                  const src =
-                    item.image || imageForMenuItem(item.name, item.category);
-                  return (
-                    <Reveal key={item.id} delay={(idx % 4) * 0.05} y={18}>
-                      <article className="dish-card">
-                        <div className="dish-photo">
-                          <Image
-                            src={src}
-                            alt={item.name}
-                            fill
-                            className="cover"
-                            sizes="(max-width: 600px) 90vw, 300px"
-                          />
-                          <div className="dish-tags">
-                            {item.isNew && (
-                              <span className="neo-badge neo-badge-gold">New</span>
-                            )}
-                            {item.isHighlighted && (
-                              <span className="neo-badge neo-badge-ink">
-                                Signature
-                              </span>
-                            )}
-                            {item.hasDiscount && (
-                              <span className="neo-badge neo-badge-rose">Offer</span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="dish-body">
-                          <h4>
-                            <span className={clsx("veg-dot", !item.isVeg && "non")} />
-                            {item.name}
-                          </h4>
-                          {item.description && <p>{item.description}</p>}
-                        </div>
-                      </article>
-                    </Reveal>
-                  );
-                })}
+              <div className={clsx("order-menu-list public-menu-list", menuView === "card" && "is-cards")}>
+                {list.map(renderItem)}
               </div>
             </section>
           ))}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Search, ShoppingBag, X } from "lucide-react";
 import { NeoButton, NeoInput } from "@/components/Neo";
+import { ScrollHint } from "@/components/ScrollHint";
 import { formatMoney } from "@/lib/cafe";
 import type { MenuItem } from "@/lib/types";
 
@@ -223,7 +224,7 @@ export function TakeOrderSheet({
               autoFocus
             />
           </label>
-          <div className="chip-row take-order-chips">
+          <ScrollHint className="chip-row take-order-chips">
             {categories.map((cat) => (
               <button
                 key={cat}
@@ -234,7 +235,7 @@ export function TakeOrderSheet({
                 {cat}
               </button>
             ))}
-          </div>
+          </ScrollHint>
           <div className="take-order-list">
             {filtered.map((item) => (
               <button key={item.id} type="button" className="take-order-row" onClick={() => openItem(item)}>

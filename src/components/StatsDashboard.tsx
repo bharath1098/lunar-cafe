@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import type { AnalyticsResult, PeriodTotals, StatsRange } from "@/lib/analytics";
 import { NeoButton } from "@/components/Neo";
+import { ScrollHint } from "@/components/ScrollHint";
 
 const RANGES: { id: StatsRange; label: string; prev: string }[] = [
   { id: "today", label: "Today", prev: "yesterday" },
@@ -338,7 +339,7 @@ function Heatmap({ data }: { data: AnalyticsResult }) {
   );
   return (
     <div className="an-heat">
-      <div className="an-heat-scroll">
+      <ScrollHint className="an-heat-scroll">
         <div
           className="an-heat-grid"
           style={{ gridTemplateColumns: `28px repeat(${hours.length}, minmax(18px, 1fr))` }}
@@ -373,7 +374,7 @@ function Heatmap({ data }: { data: AnalyticsResult }) {
             </div>
           ))}
         </div>
-      </div>
+      </ScrollHint>
       <div className="an-heat-legend">
         <span>Quiet</span>
         <i />
