@@ -158,10 +158,11 @@ export default function StaffDashboard() {
     setTab(u.role === "kitchen" ? "kitchen" : u.role === "waiter" ? "tables" : "overview");
   }, [router]);
 
-  const load = useCallback(async (quiet = false) => {
+  const load = useCallback(async (quiet?: boolean) => {
+    const silent = quiet === true;
     const res = await fetch("/api/staff/dashboard", {
       cache: "no-store",
-      headers: quiet ? { "X-Lunar-Quiet": "1" } : undefined,
+      headers: silent ? { "X-Lunar-Quiet": "1" } : undefined,
     });
     if (res.ok) setDash(await res.json());
   }, []);
