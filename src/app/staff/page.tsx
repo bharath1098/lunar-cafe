@@ -917,7 +917,7 @@ export default function StaffDashboard() {
               <em>{unreadAlerts.length > 99 ? "99+" : unreadAlerts.length}</em>
             )}
           </button>
-          <button type="button" onClick={load} aria-label="Refresh">
+          <button type="button" onClick={() => void load()} aria-label="Refresh">
             <RefreshCw size={18} />
           </button>
           <Link href="/" aria-label="Public site">
@@ -1068,7 +1068,7 @@ export default function StaffDashboard() {
                 <em>{unreadAlerts.length > 99 ? "99+" : unreadAlerts.length}</em>
               )}
             </button>
-            <NeoButton variant="ghost" onClick={load} className="staff-refresh-desktop">
+            <NeoButton variant="ghost" onClick={() => void load()} className="staff-refresh-desktop">
               <RefreshCw size={15} /> Refresh
             </NeoButton>
             {alertsOpen && (
