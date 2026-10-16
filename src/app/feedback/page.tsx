@@ -6,6 +6,7 @@ import { PageHero, PublicShell } from "@/components/PublicShell";
 import { Reveal } from "@/components/Reveal";
 import { NeoButton, NeoInput, NeoSelect, NeoTextarea } from "@/components/Neo";
 import { CAFE_MEDIA } from "@/lib/media";
+import { loadPublicData } from "@/lib/public-data";
 
 type Fb = {
   id: string;
@@ -20,9 +21,9 @@ export default function FeedbackPage() {
   const [done, setDone] = useState(false);
 
   function load() {
-    fetch("/api/public")
-      .then((r) => r.json())
-      .then((d) => setList(d.feedback || []));
+    loadPublicData()
+      .then((d) => setList(d.feedback || []))
+      .catch(() => setList([]));
   }
 
   useEffect(() => {

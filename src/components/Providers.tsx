@@ -11,6 +11,7 @@ import {
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { ApiLoader } from "@/components/ApiLoader";
+import { IntroSplash } from "@/components/IntroSplash";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
@@ -87,6 +88,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <PrefsContext.Provider value={value}>
       {children}
       <ApiLoader />
+      <IntroSplash />
     </PrefsContext.Provider>
   );
 }

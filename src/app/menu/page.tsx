@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -8,6 +8,7 @@ import clsx from "clsx";
 import { CategoryBar } from "@/components/CategoryBar";
 import { PublicShell } from "@/components/PublicShell";
 import { imageForMenuItem } from "@/lib/media";
+import { loadPublicData } from "@/lib/public-data";
 
 type PublicItem = {
   id: string;
@@ -31,9 +32,9 @@ export default function MenuPage() {
   const [moreCatsOpen, setMoreCatsOpen] = useState(false);
 
   useEffect(() => {
-    fetch("/api/public")
-      .then((r) => r.json())
-      .then((d) => setItems(d.menu || []));
+    loadPublicData()
+      .then((d) => setItems(d.menu || []))
+      .catch(() => setItems([]));
   }, []);
 
   useEffect(() => {

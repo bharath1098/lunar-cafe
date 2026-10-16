@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import "./explore.css";
 import Image from "next/image";
@@ -15,6 +15,7 @@ import { EXPLORE, getExplore, type Explore } from "@/lib/explore";
 import { imageForMenuItem } from "@/lib/media";
 import { getTasteProfile } from "@/lib/taste-profile";
 import { TasteProfile } from "@/components/explore/TasteProfile";
+import { loadPublicData } from "@/lib/public-data";
 
 type PublicItem = {
   id: string;
@@ -50,8 +51,7 @@ export function ExploreView({ slug }: { slug: string }) {
   const [menu, setMenu] = useState<PublicItem[] | null>(null);
   useEffect(() => {
     let alive = true;
-    fetch("/api/public")
-      .then((r) => r.json())
+    loadPublicData()
       .then((d) => alive && setMenu(d.menu || []))
       .catch(() => alive && setMenu([]));
     return () => {

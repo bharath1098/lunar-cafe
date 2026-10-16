@@ -53,7 +53,13 @@ export default function RootLayout({
               "(function(){var B=1920,M=1280,d=document.documentElement;" +
               "function z(){var w=window.innerWidth,k=w>=M?Math.min(w/B,2.5):1;" +
               "d.style.setProperty('--ui-zoom',k.toFixed(4))}" +
-              "z();window.addEventListener('resize',z)})()",
+              "z();window.addEventListener('resize',z)})();" +
+              "(function(){var d=document.documentElement,p=location.pathname;" +
+              "if(/^\\/(staff|order|t)(\\/|$)/.test(p)){d.dataset.intro='skip';return}" +
+              "if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){d.dataset.intro='done';return}" +
+              "try{if(sessionStorage.getItem('lunar-intro-seen')){d.dataset.intro='done';return}}catch(e){}" +
+              "d.dataset.intro='open';d.dataset.introStart=String(Date.now());" +
+              "(new Image()).src='/media/sky/moon.jpg'})()",
           }}
         />
       </head>
