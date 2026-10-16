@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
@@ -222,31 +222,38 @@ export default function HomePage() {
         </div>
       </section>
 
-      <ScrollHint className="taste-strip" forceEnd>
+      <ScrollHint className="taste-strip" loop autoScroll>
         <div className="taste-track" id="favourites" aria-label="Our favourites">
-          {[...TASTES, ...TASTES].map((t, i) => (
-            <Link
-              href={`/menu/${t.slug}`}
-              key={i}
-              className="taste-item"
-              style={{ "--c": t.accent } as CSSProperties}
-              aria-hidden={i >= TASTES.length ? true : undefined}
-              tabIndex={i >= TASTES.length ? -1 : undefined}
+          {[0, 1].map((copy) => (
+            <div
+              key={copy}
+              className="taste-set"
+              aria-hidden={copy === 1 ? true : undefined}
             >
-              <Image src={t.img} alt={t.name} fill className="cover" sizes="240px" />
-              <span className="taste-index">
-                {String((i % TASTES.length) + 1).padStart(2, "0")}
-              </span>
-              <span className="taste-glass">
-                <span className="taste-text">
-                  <span className="taste-note">{t.note}</span>
-                  <span className="taste-name">{t.name}</span>
-                </span>
-                <span className="taste-arrow" aria-hidden>
-                  <ArrowRight size={16} />
-                </span>
-              </span>
-            </Link>
+              {TASTES.map((t, i) => (
+                <Link
+                  href={`/menu/${t.slug}`}
+                  key={`${copy}-${t.slug}`}
+                  className="taste-item"
+                  style={{ "--c": t.accent } as CSSProperties}
+                  tabIndex={copy === 1 ? -1 : undefined}
+                >
+                  <Image src={t.img} alt={t.name} fill className="cover" sizes="240px" />
+                  <span className="taste-index">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="taste-glass">
+                    <span className="taste-text">
+                      <span className="taste-note">{t.note}</span>
+                      <span className="taste-name">{t.name}</span>
+                    </span>
+                    <span className="taste-arrow" aria-hidden>
+                      <ArrowRight size={16} />
+                    </span>
+                  </span>
+                </Link>
+              ))}
+            </div>
           ))}
         </div>
       </ScrollHint>
@@ -290,7 +297,7 @@ export default function HomePage() {
                       alt=""
                       fill
                       className="cover"
-                      sizes="(max-width: 960px) 100vw, 50vw"
+                      sizes="(max-width: 960px) 70vw, 50vw"
                       priority={i === 0}
                     />
                   </span>

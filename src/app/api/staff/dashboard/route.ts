@@ -88,6 +88,7 @@ export async function GET() {
     reservations: store.reservations,
     loyalty: store.loyalty,
     feedback: store.feedback,
+    staffAlerts: store.staffAlerts || [],
     settings: store.settings,
     ordering,
     stats: await getStats(),

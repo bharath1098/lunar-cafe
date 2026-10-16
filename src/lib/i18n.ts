@@ -18,7 +18,7 @@ const dict = {
     joinLoyalty: "Join Lunar Rewards",
     hours: "Hours",
     call: "Call",
-    orderPartners: "Also order on",
+    orderPartners: "Order or reserve on",
   },
   hi: {
     home: "होम",
@@ -37,7 +37,7 @@ const dict = {
     joinLoyalty: "लूनर रिवॉर्ड्स जॉइन करें",
     hours: "समय",
     call: "कॉल",
-    orderPartners: "यहाँ भी ऑर्डर करें",
+    orderPartners: "ऑर्डर या टेबल बुक करें",
   },
   te: {
     home: "హోమ్",
@@ -56,7 +56,7 @@ const dict = {
     joinLoyalty: "లూనర్ రివార్డ్స్ జాయిన్ అవ్వండి",
     hours: "సమయం",
     call: "కాల్",
-    orderPartners: "ఇక్కడ కూడా ఆర్డర్ చేయండి",
+    orderPartners: "ఆర్డర్ లేదా టేబుల్ బుక్ చేయండి",
   },
 } as const;
 

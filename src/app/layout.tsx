@@ -20,6 +20,10 @@ export const metadata: Metadata = {
   title: "Lunar Cafe | Jubilee Hills, Hyderabad",
   description:
     "A space to pause. A place to connect. Moments that matter. Artisanal coffee and gourmet fusion at Lunar Cafe, Jubilee Hills.",
+  icons: {
+    icon: "/media/cafe/lunar-logo.jpg",
+    apple: "/media/cafe/lunar-logo.jpg",
+  },
 };
 
 export const viewport: Viewport = {

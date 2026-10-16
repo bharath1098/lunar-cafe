@@ -17,12 +17,11 @@ export default function ContactPage() {
       />
       <section className="section" style={{ paddingTop: "2rem" }}>
         <div className="wrap">
-          <div className="info-grid">
+          <div className="info-grid contact-info">
             {[
               { i: <MapPin size={22} />, t: "Address", d: CAFE.addressLines.join(", ") + ", Hyderabad" },
               { i: <Clock size={22} />, t: "Hours", d: `${CAFE.hours}, every day` },
               { i: <Phone size={22} />, t: "Call", d: CAFE.phoneDisplay },
-              { i: <ShoppingBag size={22} />, t: "Delivery partners", d: "Zomato · Swiggy · District" },
             ].map((c, i) => (
               <Reveal key={c.t} delay={i * 0.06}>
                 <div className="info-card" style={{ height: "100%" }}>
@@ -32,24 +31,39 @@ export default function ContactPage() {
                 </div>
               </Reveal>
             ))}
+            <Reveal delay={0.18}>
+              <div className="info-card" style={{ height: "100%" }}>
+                <div className="icon-bubble">
+                  <ShoppingBag size={22} />
+                </div>
+                <h3 className="h-display h-md">Order or reserve</h3>
+                <p className="muted contact-partners">
+                  <a href={CAFE.zomatoUrl} target="_blank" rel="noreferrer">
+                    Zomato
+                  </a>
+                  <a href={CAFE.swiggyUrl} target="_blank" rel="noreferrer">
+                    Swiggy Dineout
+                  </a>
+                  <a href={CAFE.districtUrl} target="_blank" rel="noreferrer">
+                    District
+                  </a>
+                </p>
+              </div>
+            </Reveal>
           </div>
 
-          <div className="split" style={{ marginTop: "2rem" }}>
-            <Reveal>
-              <div
-                className="neo-card media-card"
-                style={{ minHeight: 380, borderRadius: 32 }}
-              >
+          <div className="contact-map">
+            <Reveal className="contact-map-cell">
+              <div className="contact-map-frame">
                 <iframe
                   title="Lunar Cafe map"
                   src={mapSrc}
-                  style={{ border: 0, width: "100%", height: "100%", minHeight: 380 }}
                   loading="lazy"
                 />
               </div>
             </Reveal>
-            <Reveal delay={0.1}>
-              <div className="arch-photo" style={{ height: "100%" }}>
+            <Reveal className="contact-map-cell" delay={0.1}>
+              <div className="contact-map-frame">
                 <Image
                   src={CAFE_MEDIA.goldSign}
                   alt="Lunar Cafe sign"

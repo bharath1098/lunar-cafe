@@ -414,7 +414,7 @@ export default function StatsDashboard() {
 
   useEffect(() => {
     let alive = true;
-    async function load() {
+    async function load(quiet = false) {
       try {
         const params = new URLSearchParams();
         if (range === "custom" && customFrom && customTo) {
@@ -424,7 +424,10 @@ export default function StatsDashboard() {
         } else {
           params.set("range", range === "custom" ? "7d" : range);
         }
-        const res = await fetch(`/api/staff/stats?${params}`, { cache: "no-store" });
+        const res = await fetch(`/api/staff/stats?${params}`, {
+          cache: "no-store",
+          headers: quiet ? { "X-Lunar-Quiet": "1" } : undefined,
+        });
         if (!res.ok) return;
         const json = (await res.json()) as AnalyticsResult;
         if (alive) setData(json);
@@ -434,7 +437,9 @@ export default function StatsDashboard() {
     }
     setLoading(true);
     load();
-    const t = setInterval(load, 15000);
+    const t = setInterval(() => {
+      void load(true);
+    }, 15000);
     return () => {
       alive = false;
       clearInterval(t);

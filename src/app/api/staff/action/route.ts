@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { calculateBill } from "@/lib/bill";
 import {
+  acknowledgeAllStaffAlerts,
+  acknowledgeStaffAlert,
   approveGuestPayment,
   approveOrderItems,
   assignWaiter,
@@ -88,6 +90,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           table: await assignWaiter(body.tableId, body.waiterId, actor),
         });
+      case "ack_alert":
+        return NextResponse.json(await acknowledgeStaffAlert(body.alertId, actor));
+      case "ack_all_alerts":
+        return NextResponse.json(await acknowledgeAllStaffAlerts(actor));
       case "update_billing":
         return NextResponse.json({
           session: await updateBilling(body.sessionId, body.patch, actor),
@@ -124,7 +130,11 @@ export async function POST(req: NextRequest) {
       }
       case "force_close":
         return NextResponse.json({
-          session: await forceCloseSession(body.sessionId, actor),
+          session: await forceCloseSession(
+            body.sessionId,
+            actor,
+            String(body.reason || ""),
+          ),
         });
       case "menu_upsert": {
         const item = body.item as MenuItem;

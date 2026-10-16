@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { Star } from "lucide-react";
@@ -47,17 +46,49 @@ const SLIDES = [
 
 const INTERVAL = 5500;
 
+function markIfComplete(
+  img: HTMLImageElement | null,
+  src: string,
+  markReady: (src: string) => void,
+) {
+  if (!img) return;
+  const done = () => {
+    if (img.naturalWidth > 0) markReady(src);
+  };
+  if (img.complete) {
+    done();
+    return;
+  }
+  img.decode?.().then(done).catch(done);
+}
+
 /** One big picture that rotates on a timer, with small thumbnails underneath. */
 export function HeroCarousel() {
   const [i, setI] = useState(0);
+  const [wanted, setWanted] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [cycle, setCycle] = useState(0); // restarts the progress bar
+  const [cycle, setCycle] = useState(0);
+  const [ready, setReady] = useState<Set<string>>(() => new Set());
   const drag = useRef<number | null>(null);
 
-  const go = useCallback((n: number) => {
-    setI((n + SLIDES.length) % SLIDES.length);
-    setCycle((c) => c + 1);
+  const markReady = useCallback((src: string) => {
+    setReady((prev) => {
+      if (prev.has(src)) return prev;
+      const next = new Set(prev);
+      next.add(src);
+      return next;
+    });
   }, []);
+
+  const go = useCallback((n: number) => {
+    setWanted((n + SLIDES.length) % SLIDES.length);
+  }, []);
+
+  useEffect(() => {
+    if (!ready.has(SLIDES[wanted].src) || wanted === i) return;
+    setI(wanted);
+    setCycle((c) => c + 1);
+  }, [wanted, ready, i]);
 
   useEffect(() => {
     if (paused) return;
@@ -89,14 +120,15 @@ export function HeroCarousel() {
       >
         {SLIDES.map((s, idx) => (
           <div key={s.src} className={clsx("hero-slide", idx === i && "active")}>
-            <Image
+            <img
               src={s.src}
               alt={s.title}
-              fill
-              priority={idx === 0}
-              sizes="(max-width: 960px) 100vw, 45vw"
-              className="cover"
+              className={clsx("cover", ready.has(s.src) && "is-ready")}
               draggable={false}
+              decoding="async"
+              fetchPriority={idx === 0 ? "high" : "low"}
+              ref={(el) => markIfComplete(el, s.src, markReady)}
+              onLoad={(e) => markIfComplete(e.currentTarget, s.src, markReady)}
             />
           </div>
         ))}
@@ -125,7 +157,14 @@ export function HeroCarousel() {
             className={clsx("hero-thumb", idx === i && "on")}
             onClick={() => go(idx)}
           >
-            <Image src={s.src} alt="" fill sizes="110px" className="cover" draggable={false} />
+            <img
+              src={s.src}
+              alt=""
+              className={clsx("cover", ready.has(s.src) && "is-ready")}
+              draggable={false}
+              decoding="async"
+              onLoad={(e) => markIfComplete(e.currentTarget, s.src, markReady)}
+            />
             {idx === i && (
               <span
                 key={cycle}

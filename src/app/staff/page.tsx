@@ -40,8 +40,9 @@ import {
   UtensilsCrossed,
   Wallet,
 } from "lucide-react";
-import { NeoButton, NeoInput, NeoSelect } from "@/components/Neo";
+import { NeoButton, NeoInput, NeoSelect, NeoTextarea } from "@/components/Neo";
 import { TakeOrderSheet } from "@/components/TakeOrderSheet";
+import { billableOrders } from "@/lib/bill";
 import { CAFE_MEDIA } from "@/lib/media";
 import { formatMoney } from "@/lib/cafe";
 import { clearStaffSession, readStaffSession } from "@/lib/staff-session";
@@ -53,6 +54,13 @@ const StatsDashboard = dynamic(() => import("@/components/StatsDashboard"), {
 });
 
 type StaffUser = { id: string; name: string; email: string; role: StaffRole; active?: boolean };
+
+const FORCE_CLOSE_REASONS = [
+  "Guest left without paying",
+  "No order / unused table",
+  "Duplicate session",
+  "Complimentary / owner",
+];
 
 const RESERVATION_STATUS_ACTIONS: { id: ReservationStatus; label: string }[] = [
   { id: "confirmed", label: "Confirmed" },
@@ -109,6 +117,36 @@ export default function StaffDashboard() {
   const [menuBusy, setMenuBusy] = useState(false);
   const [menuFormOpen, setMenuFormOpen] = useState(false);
   const menuFormRef = useRef<HTMLElement>(null);
+  const [forceClose, setForceClose] = useState<{ sessionId: string; tableLabel: string } | null>(null);
+  const [forceCloseReason, setForceCloseReason] = useState("");
+  const [forceCloseBusy, setForceCloseBusy] = useState(false);
+  const [forceCloseError, setForceCloseError] = useState("");
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const alertsRef = useRef<HTMLDivElement>(null);
+  const [reassign, setReassign] = useState<{
+    tableId: string;
+    tableLabel: string;
+    fromName: string;
+    toName: string;
+    waiterId: string | null;
+  } | null>(null);
+  const [reassignBusy, setReassignBusy] = useState(false);
+  const [genBill, setGenBill] = useState<{
+    sessionId: string;
+    tableLabel: string;
+    total: number;
+  } | null>(null);
+  const [genBillBusy, setGenBillBusy] = useState(false);
+  const [closeCafeOpen, setCloseCafeOpen] = useState(false);
+  const [closeCafeBusy, setCloseCafeBusy] = useState(false);
+  const [payBill, setPayBill] = useState<{
+    sessionId: string;
+    tableLabel: string;
+    total: number;
+    billNumber?: number;
+  } | null>(null);
+  const [payMethod, setPayMethod] = useState<"cash" | "upi" | "card">("cash");
+  const [payBusy, setPayBusy] = useState(false);
 
   useEffect(() => {
     const u = readStaffSession<StaffUser>();
@@ -120,15 +158,20 @@ export default function StaffDashboard() {
     setTab(u.role === "kitchen" ? "kitchen" : u.role === "waiter" ? "tables" : "overview");
   }, [router]);
 
-  const load = useCallback(async () => {
-    const res = await fetch("/api/staff/dashboard", { cache: "no-store" });
+  const load = useCallback(async (quiet = false) => {
+    const res = await fetch("/api/staff/dashboard", {
+      cache: "no-store",
+      headers: quiet ? { "X-Lunar-Quiet": "1" } : undefined,
+    });
     if (res.ok) setDash(await res.json());
   }, []);
 
   useEffect(() => {
     if (!user) return;
     load();
-    const t = setInterval(load, 3000);
+    const t = setInterval(() => {
+      void load(true);
+    }, 3000);
     return () => clearInterval(t);
   }, [user, load]);
 
@@ -140,6 +183,110 @@ export default function StaffDashboard() {
     });
     load();
   }
+
+  function cancelForceClose() {
+    if (forceCloseBusy) return;
+    setForceClose(null);
+    setForceCloseReason("");
+    setForceCloseError("");
+  }
+
+  async function confirmForceClose() {
+    if (!forceClose) return;
+    const reason = forceCloseReason.trim();
+    if (reason.length < 3) {
+      setForceCloseError("Enter a short reason before closing this table.");
+      return;
+    }
+    setForceCloseBusy(true);
+    setForceCloseError("");
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "force_close",
+          sessionId: forceClose.sessionId,
+          reason,
+          actor: user?.email,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setForceCloseError(data.error || "Could not close the table.");
+        return;
+      }
+      setForceClose(null);
+      setForceCloseReason("");
+      load();
+    } finally {
+      setForceCloseBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!forceClose) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancelForceClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [forceClose, forceCloseBusy]);
+
+  useEffect(() => {
+    if (!reassign) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !reassignBusy) setReassign(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [reassign, reassignBusy]);
+
+  useEffect(() => {
+    if (!genBill) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !genBillBusy) setGenBill(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [genBill, genBillBusy]);
+
+  useEffect(() => {
+    if (!closeCafeOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !closeCafeBusy) setCloseCafeOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [closeCafeOpen, closeCafeBusy]);
+
+  useEffect(() => {
+    if (!payBill) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !payBusy) setPayBill(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [payBill, payBusy]);
+
+  useEffect(() => {
+    if (!alertsOpen) return;
+    function onDoc(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (alertsRef.current?.contains(e.target as Node)) return;
+      if (target?.closest(".staff-alert-btn")) return;
+      setAlertsOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setAlertsOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [alertsOpen]);
 
   const tabs = useMemo(() => {
     if (!user) return [];
@@ -176,6 +323,93 @@ export default function StaffDashboard() {
   }
 
   const waiters = dash.staff.filter((s: StaffUser) => s.role === "waiter" && s.active !== false);
+  const myAlerts: {
+    id: string;
+    type: string;
+    tableLabel: string;
+    message: string;
+    createdAt: string;
+    actorName: string;
+    recipientStaffIds: string[];
+    readByStaffIds: string[];
+  }[] = (dash.staffAlerts || []).filter(
+    (a: { recipientStaffIds?: string[] }) => a.recipientStaffIds?.includes(user.id),
+  );
+  const unreadAlerts = myAlerts.filter((a) => !a.readByStaffIds?.includes(user.id));
+
+  function requestReassign(
+    table: { id: string; assignedWaiterId?: string | null },
+    nextWaiterId: string | null,
+  ) {
+    if (!table.assignedWaiterId || table.assignedWaiterId === nextWaiterId) {
+      action({ action: "assign_waiter", tableId: table.id, waiterId: nextWaiterId });
+      return;
+    }
+    const current = waiters.find((w: StaffUser) => w.id === table.assignedWaiterId);
+    const next = waiters.find((w: StaffUser) => w.id === nextWaiterId);
+    setReassign({
+      tableId: table.id,
+      tableLabel: table.id.replace("lunar-", ""),
+      fromName: current?.name || "another waiter",
+      toName: next?.name || "Unassigned",
+      waiterId: nextWaiterId,
+    });
+  }
+
+  function cancelReassign() {
+    if (reassignBusy) return;
+    setReassign(null);
+  }
+
+  function requestGenerateBill(session?: {
+    id: string;
+    tableId: string;
+    billGeneratedAt?: string;
+    bill?: { totalQty?: number; grandTotal?: number };
+  } | null) {
+    if (!session || session.billGeneratedAt) return;
+    if (!session.bill?.totalQty) {
+      setOrderNotice(`Table ${session.tableId.replace("lunar-", "")} has no items to bill yet.`);
+      return;
+    }
+    setGenBill({
+      sessionId: session.id,
+      tableLabel: session.tableId.replace("lunar-", ""),
+      total: session.bill.grandTotal || 0,
+    });
+  }
+
+  function cancelGenerateBill() {
+    if (genBillBusy) return;
+    setGenBill(null);
+  }
+
+  async function confirmGenerateBill() {
+    if (!genBill) return;
+    setGenBillBusy(true);
+    try {
+      await action({ action: "generate_bill", sessionId: genBill.sessionId });
+      setOrderNotice(`Bill generated for table ${genBill.tableLabel}.`);
+      setGenBill(null);
+    } finally {
+      setGenBillBusy(false);
+    }
+  }
+
+  async function confirmReassign() {
+    if (!reassign) return;
+    setReassignBusy(true);
+    try {
+      await action({
+        action: "assign_waiter",
+        tableId: reassign.tableId,
+        waiterId: reassign.waiterId,
+      });
+      setReassign(null);
+    } finally {
+      setReassignBusy(false);
+    }
+  }
 
   function resetStaffForm() {
     setEditingStaffId(null);
@@ -518,11 +752,115 @@ export default function StaffDashboard() {
     total: number;
   }[] = canTakeOrder ? dash.billRequests || [] : [];
   const canSettleBill = user.role === "owner" || user.role === "reception";
+  const canGenerateBill =
+    user.role === "waiter" || user.role === "reception" || user.role === "owner";
+  const canMarkPaid =
+    user.role === "waiter" || user.role === "reception" || user.role === "owner";
   const canControlOrdering = user.role === "owner" || user.role === "reception";
 
   async function setOrdering(patch: Record<string, unknown>) {
     await action({ action: "set_ordering", ...patch });
   }
+
+  function requestCloseCafe() {
+    setCloseCafeOpen(true);
+  }
+
+  function cancelCloseCafe() {
+    if (closeCafeBusy) return;
+    setCloseCafeOpen(false);
+  }
+
+  async function confirmCloseCafe() {
+    setCloseCafeBusy(true);
+    try {
+      await setOrdering({ ordersOpen: false });
+      setCloseCafeOpen(false);
+    } finally {
+      setCloseCafeBusy(false);
+    }
+  }
+
+  function requestMarkPaid(session: {
+    id: string;
+    tableId: string;
+    billGeneratedAt?: string;
+    paidAt?: string;
+    billNumber?: number;
+    bill?: { grandTotal?: number };
+  }) {
+    if (!session?.billGeneratedAt || session.paidAt) return;
+    setPayMethod("cash");
+    setPayBill({
+      sessionId: session.id,
+      tableLabel: session.tableId.replace("lunar-", ""),
+      total: session.bill?.grandTotal || 0,
+      billNumber: session.billNumber,
+    });
+  }
+
+  function cancelMarkPaid() {
+    if (payBusy) return;
+    setPayBill(null);
+  }
+
+  async function confirmMarkPaid() {
+    if (!payBill) return;
+    setPayBusy(true);
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "close_pay",
+          sessionId: payBill.sessionId,
+          paymentMethod: payMethod,
+          actor: user?.email,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setOrderNotice(data.error || "Could not mark the bill as paid.");
+        return;
+      }
+      setOrderNotice(
+        `Table ${payBill.tableLabel} · bill #${payBill.billNumber || "—"} marked paid (${payMethod}).`,
+      );
+      setPayBill(null);
+      load();
+    } finally {
+      setPayBusy(false);
+    }
+  }
+
+  const activeSessions = dash.activeSessions || [];
+  const closeCafePending = {
+    openTables: activeSessions.length,
+    billsNotGenerated: activeSessions.filter((s: any) => !s.billGeneratedAt).length,
+    unpaidBills: activeSessions.filter((s: any) => s.billGeneratedAt && !s.paidAt).length,
+    paymentApprovals: activeSessions.filter((s: any) => s.paymentAwaitingApproval).length,
+    initiatedBills: activeSessions.filter(
+      (s: any) => s.billRequestedAt && !s.billGeneratedAt,
+    ).length,
+    tables: activeSessions.map((s: any) => ({
+      label: String(s.tableId || "").replace("lunar-", ""),
+      status: s.paidAt
+        ? "Paid"
+        : s.paymentAwaitingApproval
+          ? "Payment pending"
+          : s.billGeneratedAt
+            ? `Bill #${s.billNumber} unpaid`
+            : s.billRequestedAt
+              ? "Initiated bill"
+              : "Open · no bill yet",
+      total: s.bill?.grandTotal || 0,
+    })),
+  };
+  const closeCafeHasPending =
+    closeCafePending.openTables > 0 ||
+    closeCafePending.unpaidBills > 0 ||
+    closeCafePending.paymentApprovals > 0;
+
   const paymentApprovals: {
     sessionId: string;
     tableId: string;
@@ -558,7 +896,7 @@ export default function StaffDashboard() {
       <header className="staff-mobile-top no-print">
         <div className="staff-mobile-brand">
           <span className="brand-mark">
-            <Image src={CAFE_MEDIA.goldSign} alt="" fill sizes="36px" className="cover" />
+            <Image src={CAFE_MEDIA.logo} alt="" fill sizes="36px" className="cover" />
           </span>
           <div>
             <strong>{user.name}</strong>
@@ -566,6 +904,19 @@ export default function StaffDashboard() {
           </div>
         </div>
         <div className="staff-mobile-actions">
+          <button
+            type="button"
+            className={clsx("staff-alert-btn", unreadAlerts.length > 0 && "has-unread")}
+            onClick={() => setAlertsOpen((v) => !v)}
+            aria-label={
+              unreadAlerts.length ? `${unreadAlerts.length} new alerts` : "Staff alerts"
+            }
+          >
+            <Bell size={18} />
+            {unreadAlerts.length > 0 && (
+              <em>{unreadAlerts.length > 99 ? "99+" : unreadAlerts.length}</em>
+            )}
+          </button>
           <button type="button" onClick={load} aria-label="Refresh">
             <RefreshCw size={18} />
           </button>
@@ -664,7 +1015,7 @@ export default function StaffDashboard() {
       <aside className="staff-side no-print">
         <div className="brand staff-brand" style={{ marginBottom: "1.4rem", padding: "0 0.4rem" }}>
           <span className="brand-mark">
-            <Image src={CAFE_MEDIA.goldSign} alt="" fill sizes="42px" className="cover" />
+            <Image src={CAFE_MEDIA.logo} alt="" fill sizes="42px" className="cover" />
           </span>
           <span className="brand-text">
             <strong style={{ fontSize: "1.1rem" }}>LUNAR</strong>
@@ -703,9 +1054,60 @@ export default function StaffDashboard() {
             <span className="eyebrow">Lunar Cafe · live</span>
             <h1 className="h-display h-lg" style={{ marginTop: 6 }}>{title}</h1>
           </div>
-          <NeoButton variant="ghost" onClick={load} className="staff-refresh-desktop">
-            <RefreshCw size={15} /> Refresh
-          </NeoButton>
+          <div className="staff-title-actions" ref={alertsRef}>
+            <button
+              type="button"
+              className={clsx("staff-alert-btn staff-alert-btn-desktop", unreadAlerts.length > 0 && "has-unread")}
+              onClick={() => setAlertsOpen((v) => !v)}
+              aria-label={
+                unreadAlerts.length ? `${unreadAlerts.length} new alerts` : "Staff alerts"
+              }
+            >
+              <Bell size={16} />
+              {unreadAlerts.length > 0 && (
+                <em>{unreadAlerts.length > 99 ? "99+" : unreadAlerts.length}</em>
+              )}
+            </button>
+            <NeoButton variant="ghost" onClick={load} className="staff-refresh-desktop">
+              <RefreshCw size={15} /> Refresh
+            </NeoButton>
+            {alertsOpen && (
+              <div className="staff-alert-panel" role="dialog" aria-label="Staff alerts">
+                <div className="staff-alert-panel-head">
+                  <strong>Alerts</strong>
+                  {unreadAlerts.length > 0 && (
+                    <button
+                      type="button"
+                      className="staff-alert-mark"
+                      onClick={() => action({ action: "ack_all_alerts" })}
+                    >
+                      Mark all read
+                    </button>
+                  )}
+                </div>
+                {myAlerts.length === 0 && <p className="muted">No table assignment alerts yet.</p>}
+                <ul>
+                  {myAlerts.slice(0, 20).map((alert) => {
+                    const unread = !alert.readByStaffIds?.includes(user.id);
+                    return (
+                      <li key={alert.id} className={clsx(unread && "is-unread")}>
+                        <button
+                          type="button"
+                          onClick={() => unread && action({ action: "ack_alert", alertId: alert.id })}
+                        >
+                          <span>{alert.message}</span>
+                          <small>
+                            {alert.tableLabel} · {waitLabel(alert.createdAt)}
+                            {unread ? " · new" : ""}
+                          </small>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
 
         {ordering && (
@@ -733,7 +1135,11 @@ export default function StaffDashboard() {
                 <NeoButton
                   className="btn-sm"
                   variant={ordering.ordersOpen ? "ghost" : undefined}
-                  onClick={() => setOrdering({ ordersOpen: !ordering.ordersOpen })}
+                  onClick={() =>
+                    ordering.ordersOpen
+                      ? requestCloseCafe()
+                      : setOrdering({ ordersOpen: true })
+                  }
                 >
                   {ordering.ordersOpen ? "Close cafe" : "Open cafe"}
                 </NeoButton>
@@ -762,24 +1168,27 @@ export default function StaffDashboard() {
                 <article key={request.sessionId} className="bill-request-card">
                   <div>
                     <strong>
-                      <Bell size={16} /> {tableLabel} · {request.guestName} is requesting the bill
+                      <Bell size={16} /> {tableLabel} · Initiated bill
+                      {request.guestName ? ` · ${request.guestName}` : ""}
                     </strong>
                     <p>
                       {formatMoney(request.total)} · {waitLabel(request.requestedAt)}
                       {waiter ? ` · Assigned to ${waiter.name}` : ""}
                     </p>
                   </div>
-                  {canSettleBill ? (
+                  {canGenerateBill ? (
                     <NeoButton
                       className="btn-sm"
-                      onClick={() => {
-                        setTab("bills");
-                      }}
+                      onClick={() =>
+                        requestGenerateBill(
+                          dash.activeSessions.find((s: { id: string }) => s.id === request.sessionId),
+                        )
+                      }
                     >
-                      Open bills
+                      <Receipt size={15} /> Generate bill
                     </NeoButton>
                   ) : (
-                    <span className="neo-badge neo-badge-rose">Bill requested</span>
+                    <span className="neo-badge neo-badge-rose">Initiated bill</span>
                   )}
                 </article>
               );
@@ -829,7 +1238,14 @@ export default function StaffDashboard() {
               {dash.tables.map((t: any) => {
                 const s = dash.activeSessions.find((x: any) => x.tableId === t.id);
                 return (
-                  <div key={t.id} className={clsx("table-tile table-tile-compact", s ? "busy" : "free", canTakeOrder && s?.billRequestedAt && "wants-bill")}>
+                  <div
+                    key={t.id}
+                    className={clsx(
+                      "table-tile table-tile-compact",
+                      s ? "busy" : "free",
+                      canTakeOrder && s?.billRequestedAt && !s?.billGeneratedAt && "wants-bill",
+                    )}
+                  >
                     <div className="table-tile-head">
                       <strong className="table-tile-id">{t.id.replace("lunar-", "")}</strong>
                       <span className={clsx("neo-badge", s ? "neo-badge-gold" : "neo-badge-mint")}>
@@ -841,17 +1257,57 @@ export default function StaffDashboard() {
                     ) : (
                       <span className="table-tile-status muted">Ready for guests</span>
                     )}
-                    {canTakeOrder && s?.billRequestedAt && (
+                    {canTakeOrder && s?.billRequestedAt && !s?.billGeneratedAt && (
                       <span className="neo-badge neo-badge-rose">
-                        {s.billRequestedByName || "Guest"} wants the bill
+                        Initiated bill
                       </span>
                     )}
-                    {canTakeOrder && cafeAcceptingOrders && (
-                      <NeoButton className="btn-sm w-full" onClick={() => openOrder(t.id)}>
-                        Take order
-                      </NeoButton>
-                    )}
-                    {canTakeOrder && !cafeAcceptingOrders && (
+                    <div className="table-tile-cta-row">
+                      {canTakeOrder && cafeAcceptingOrders && !s?.billGeneratedAt && (
+                        <NeoButton className="btn-sm" onClick={() => openOrder(t.id)} aria-label="Take order">
+                          <span className="table-tile-cta-ico" aria-hidden>
+                            <UtensilsCrossed size={15} />
+                          </span>
+                          Order
+                        </NeoButton>
+                      )}
+                      {s && canGenerateBill && !s.billGeneratedAt && s.bill?.totalQty > 0 && (
+                        <NeoButton
+                          className="btn-sm"
+                          variant="ghost"
+                          onClick={() => requestGenerateBill(s)}
+                          aria-label="Generate bill"
+                        >
+                          <span className="table-tile-cta-ico" aria-hidden>
+                            <Receipt size={15} />
+                          </span>
+                          Bill
+                        </NeoButton>
+                      )}
+                      {s?.billGeneratedAt && !s.paidAt && (
+                        <>
+                          <Link href={`/staff/bill/${s.id}`} className="btn neo-btn-ghost btn-sm" aria-label="Print bill">
+                            <span className="table-tile-cta-ico" aria-hidden>
+                              <Printer size={15} />
+                            </span>
+                            Print
+                          </Link>
+                          {canMarkPaid && (
+                            <NeoButton
+                              className="btn-sm"
+                              onClick={() => requestMarkPaid(s)}
+                              aria-label="Mark bill paid"
+                            >
+                              <span className="table-tile-cta-ico" aria-hidden>
+                                <Banknote size={15} />
+                              </span>
+                              Bill paid
+                            </NeoButton>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {canTakeOrder && !cafeAcceptingOrders && !s?.billGeneratedAt && (
                       <span className="muted" style={{ fontSize: "0.78rem" }}>
                         Ordering closed
                       </span>
@@ -925,7 +1381,15 @@ export default function StaffDashboard() {
               const session = dash.activeSessions.find((s: any) => s.tableId === t.id);
               const waiter = waiters.find((w: StaffUser) => w.id === t.assignedWaiterId);
               return (
-                <div key={t.id} className={clsx("table-tile", session ? "busy" : "free", session?.billRequestedAt && "wants-bill", editingTableId === t.id && "is-editing")}>
+                <div
+                  key={t.id}
+                  className={clsx(
+                    "table-tile",
+                    session ? "busy" : "free",
+                    session?.billRequestedAt && !session?.billGeneratedAt && "wants-bill",
+                    editingTableId === t.id && "is-editing",
+                  )}
+                >
                   <div className="table-tile-head">
                     <strong className="table-tile-id">{t.id.replace("lunar-", "")}</strong>
                     <div className="table-tile-badges">
@@ -938,9 +1402,9 @@ export default function StaffDashboard() {
                         {session ? "Occupied" : "Available"}
                       </span>
                       <span className="neo-badge neo-badge-ink">{t.section}</span>
-                      {session?.billRequestedAt && (
+                      {session?.billRequestedAt && !session?.billGeneratedAt && (
                         <span className="neo-badge neo-badge-rose">
-                          {session.billRequestedByName || "Guest"} wants the bill
+                          Initiated bill
                         </span>
                       )}
                     </div>
@@ -979,26 +1443,64 @@ export default function StaffDashboard() {
                     )}
                   </div>
                   <div className="table-tile-actions">
-                    {canTakeOrder && cafeAcceptingOrders && (
-                      <NeoButton className="btn-sm w-full" onClick={() => openOrder(t.id)}>
-                        Take order
-                      </NeoButton>
-                    )}
-                    {canTakeOrder && !cafeAcceptingOrders && (
+                    <div className="table-tile-cta-row">
+                      {canTakeOrder && cafeAcceptingOrders && !session?.billGeneratedAt && (
+                        <NeoButton className="btn-sm" onClick={() => openOrder(t.id)} aria-label="Take order">
+                          <span className="table-tile-cta-ico" aria-hidden>
+                            <UtensilsCrossed size={15} />
+                          </span>
+                          Order
+                        </NeoButton>
+                      )}
+                      {session && canGenerateBill && !session.billGeneratedAt && session.bill?.totalQty > 0 && (
+                        <NeoButton
+                          className="btn-sm"
+                          variant="ghost"
+                          onClick={() => requestGenerateBill(session)}
+                          aria-label="Generate bill"
+                        >
+                          <span className="table-tile-cta-ico" aria-hidden>
+                            <Receipt size={15} />
+                          </span>
+                          Bill
+                        </NeoButton>
+                      )}
+                      {session?.billGeneratedAt && !session.paidAt && (
+                        <>
+                          <Link
+                            href={`/staff/bill/${session.id}`}
+                            className="btn neo-btn-ghost btn-sm"
+                            aria-label="Print bill"
+                          >
+                            <span className="table-tile-cta-ico" aria-hidden>
+                              <Printer size={15} />
+                            </span>
+                            Print
+                          </Link>
+                          {canMarkPaid && (
+                            <NeoButton
+                              className="btn-sm"
+                              onClick={() => requestMarkPaid(session)}
+                              aria-label="Mark bill paid"
+                            >
+                              <span className="table-tile-cta-ico" aria-hidden>
+                                <Banknote size={15} />
+                              </span>
+                              Bill paid
+                            </NeoButton>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {canTakeOrder && !cafeAcceptingOrders && !session?.billGeneratedAt && (
                       <span className="muted" style={{ fontSize: "0.78rem" }}>
                         Ordering closed
                       </span>
                     )}
                     <NeoSelect
-                      label={waiter ? `Handled by ${waiter.name}` : "Waiter"}
+                      label="Waiter"
                       value={t.assignedWaiterId || ""}
-                      onChange={(e) =>
-                        action({
-                          action: "assign_waiter",
-                          tableId: t.id,
-                          waiterId: e.target.value || null,
-                        })
-                      }
+                      onChange={(e) => requestReassign(t, e.target.value || null)}
                     >
                       <option value="">Unassigned</option>
                       {waiters.map((w: StaffUser) => (
@@ -1105,6 +1607,13 @@ export default function StaffDashboard() {
                           {o.variantLabel ? ` · ${o.variantLabel}` : ""}
                         </p>
                         {o.notes && <p className="kitchen-ticket-note">“{o.notes}”</p>}
+                        {o.takenByStaffName && (
+                          <p className="kitchen-ticket-waiter">
+                            {o.isCoverOrder && o.assignedWaiterName
+                              ? `Taken by ${o.takenByStaffName} · covering ${o.assignedWaiterName}`
+                              : `Taken by ${o.takenByStaffName}`}
+                          </p>
+                        )}
                         <div className="kitchen-ticket-foot">
                           <span className="kitchen-ticket-time">
                             <Clock size={13} /> {waitLabel(o.createdAt)}
@@ -1139,6 +1648,7 @@ export default function StaffDashboard() {
               const tableLabel = s.tableId.replace("lunar-", "");
               const guests = s.members?.length || 0;
               const items = s.bill.totalQty || 0;
+              const lines = billableOrders(s.orders || []);
               return (
                 <article
                   key={s.id}
@@ -1160,7 +1670,7 @@ export default function StaffDashboard() {
                         )}
                         {s.billRequestedAt && !s.billGeneratedAt && (
                           <span className="neo-badge neo-badge-rose">
-                            {s.billRequestedByName || "Guest"} wants the bill
+                            Initiated bill
                           </span>
                         )}
                       </div>
@@ -1179,6 +1689,34 @@ export default function StaffDashboard() {
                       <strong className="h-display">{formatMoney(s.bill.grandTotal)}</strong>
                     </div>
                   </header>
+
+                  <div className="bill-items">
+                    <div className="bill-items-head">
+                      <span>Item</span>
+                      <span>Qty</span>
+                      <span>Price</span>
+                      <span>Amt</span>
+                    </div>
+                    {lines.length === 0 && (
+                      <p className="bill-items-empty muted">No billable items yet.</p>
+                    )}
+                    {lines.map((line) => (
+                      <div key={line.id} className="bill-items-row">
+                        <span className="bill-items-name">
+                          {line.name}
+                          {line.variantLabel ? ` · ${line.variantLabel}` : ""}
+                          {line.notes ? (
+                            <small className="bill-items-note">{line.notes}</small>
+                          ) : null}
+                        </span>
+                        <span className="bill-items-qty">{line.qty}</span>
+                        <span className="bill-items-price">{formatMoney(line.unitPrice)}</span>
+                        <span className="bill-items-amt">
+                          {formatMoney(line.unitPrice * line.qty)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
 
                   <div className="bill-card-grid">
                     <div className="bill-summary">
@@ -1307,56 +1845,31 @@ export default function StaffDashboard() {
                           <CheckCheck size={16} /> Approve payment &amp; close
                         </button>
                       </div>
-                    ) : canSettleBill && !s.billGeneratedAt ? (
+                    ) : canGenerateBill && !s.billGeneratedAt ? (
                       <div className="bill-pay-group" role="group" aria-label="Generate bill">
                         <button
                           type="button"
                           className="bill-pay-btn"
-                          disabled={!s.billRequestedAt}
-                          onClick={() =>
-                            action({ action: "generate_bill", sessionId: s.id })
-                          }
+                          onClick={() => requestGenerateBill(s)}
                         >
                           <Receipt size={16} /> Generate bill
                         </button>
                       </div>
-                    ) : canSettleBill ? (
+                    ) : canMarkPaid && s.billGeneratedAt && !s.paidAt ? (
                       <div className="bill-pay-group" role="group" aria-label="Mark as paid">
                         <button
                           type="button"
                           className="bill-pay-btn"
-                          onClick={() =>
-                            action({ action: "close_pay", sessionId: s.id, paymentMethod: "cash" })
-                          }
+                          onClick={() => requestMarkPaid(s)}
                         >
-                          <Banknote size={16} /> Cash
-                        </button>
-                        <button
-                          type="button"
-                          className="bill-pay-btn"
-                          onClick={() =>
-                            action({ action: "close_pay", sessionId: s.id, paymentMethod: "upi" })
-                          }
-                        >
-                          <Smartphone size={16} /> UPI
-                        </button>
-                        <button
-                          type="button"
-                          className="bill-pay-btn"
-                          onClick={() =>
-                            action({ action: "close_pay", sessionId: s.id, paymentMethod: "card" })
-                          }
-                        >
-                          <CreditCard size={16} /> Card
+                          <Banknote size={16} /> Bill paid
                         </button>
                       </div>
                     ) : (
                       <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
                         {s.billGeneratedAt
                           ? `Generated bill #${s.billNumber} · ${formatMoney(s.bill.grandTotal)}`
-                          : s.billRequestedAt
-                            ? "Waiting for reception or owner to generate the bill"
-                            : "No bill request yet"}
+                          : "No items to bill yet"}
                       </p>
                     )}
                     <div className="bill-secondary">
@@ -1369,7 +1882,11 @@ export default function StaffDashboard() {
                         <NeoButton
                           variant="danger"
                           className="btn-sm"
-                          onClick={() => action({ action: "force_close", sessionId: s.id })}
+                          onClick={() => {
+                            setForceCloseError("");
+                            setForceCloseReason("");
+                            setForceClose({ sessionId: s.id, tableLabel });
+                          }}
                         >
                           Force close
                         </NeoButton>
@@ -1886,6 +2403,244 @@ export default function StaffDashboard() {
           </>
         )}
       </main>
+      {closeCafeOpen && (
+        <div className="staff-confirm-backdrop" onClick={cancelCloseCafe} role="presentation">
+          <div
+            className="staff-confirm staff-confirm-wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="close-cafe-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="close-cafe-title">Close cafe?</h2>
+            <p>
+              Guests and staff will not be able to place new orders until you open the cafe
+              again.
+            </p>
+            {closeCafeHasPending ? (
+              <>
+                <p className="staff-confirm-warn">
+                  There {closeCafePending.openTables === 1 ? "is" : "are"} still{" "}
+                  <strong>{closeCafePending.openTables}</strong> open{" "}
+                  {closeCafePending.openTables === 1 ? "table" : "tables"} that{" "}
+                  {closeCafePending.openTables === 1 ? "is" : "are"} not fully closed.
+                </p>
+                <ul className="staff-confirm-stats">
+                  {closeCafePending.billsNotGenerated > 0 && (
+                    <li>
+                      <strong>{closeCafePending.billsNotGenerated}</strong> bill
+                      {closeCafePending.billsNotGenerated === 1 ? "" : "s"} not generated yet
+                    </li>
+                  )}
+                  {closeCafePending.initiatedBills > 0 && (
+                    <li>
+                      <strong>{closeCafePending.initiatedBills}</strong> initiated bill
+                      {closeCafePending.initiatedBills === 1 ? "" : "s"} waiting
+                    </li>
+                  )}
+                  {closeCafePending.unpaidBills > 0 && (
+                    <li>
+                      <strong>{closeCafePending.unpaidBills}</strong> unpaid bill
+                      {closeCafePending.unpaidBills === 1 ? "" : "s"}
+                    </li>
+                  )}
+                  {closeCafePending.paymentApprovals > 0 && (
+                    <li>
+                      <strong>{closeCafePending.paymentApprovals}</strong> payment
+                      {closeCafePending.paymentApprovals === 1 ? "" : "s"} awaiting approval
+                    </li>
+                  )}
+                </ul>
+                <div className="staff-confirm-pending">
+                  {closeCafePending.tables.map((t: { label: string; status: string; total: number }) => (
+                    <div key={t.label} className="staff-confirm-pending-row">
+                      <strong>{t.label}</strong>
+                      <span>{t.status}</span>
+                      <b>{formatMoney(t.total)}</b>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p>All tables are clear — no open bills pending.</p>
+            )}
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={cancelCloseCafe} disabled={closeCafeBusy}>
+                Cancel
+              </NeoButton>
+              <NeoButton variant="danger" onClick={confirmCloseCafe} disabled={closeCafeBusy}>
+                {closeCafeBusy ? "Closing…" : "Close cafe anyway"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
+      )}
+      {genBill && (
+        <div className="staff-confirm-backdrop" onClick={cancelGenerateBill} role="presentation">
+          <div
+            className="staff-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gen-bill-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="gen-bill-title">Generate bill?</h2>
+            <p>
+              Create the bill for <strong>{genBill.tableLabel}</strong> ·{" "}
+              <strong>{formatMoney(genBill.total)}</strong>. New kitchen tickets on this table
+              will close.
+            </p>
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={cancelGenerateBill} disabled={genBillBusy}>
+                Cancel
+              </NeoButton>
+              <NeoButton onClick={confirmGenerateBill} disabled={genBillBusy}>
+                {genBillBusy ? "Generating…" : "Generate bill"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
+      )}
+      {payBill && (
+        <div className="staff-confirm-backdrop" onClick={cancelMarkPaid} role="presentation">
+          <div
+            className="staff-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pay-bill-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="pay-bill-title">Mark bill paid?</h2>
+            <p>
+              Table <strong>{payBill.tableLabel}</strong>
+              {payBill.billNumber ? (
+                <>
+                  {" "}
+                  · bill #<strong>{payBill.billNumber}</strong>
+                </>
+              ) : null}{" "}
+              · <strong>{formatMoney(payBill.total)}</strong>
+            </p>
+            <p className="muted" style={{ marginTop: "-0.35rem" }}>
+              How did the guest pay?
+            </p>
+            <div className="staff-confirm-chips" role="group" aria-label="Payment method">
+              {(
+                [
+                  { id: "cash" as const, label: "Cash", icon: <Banknote size={15} /> },
+                  { id: "upi" as const, label: "UPI", icon: <Smartphone size={15} /> },
+                  { id: "card" as const, label: "Card", icon: <CreditCard size={15} /> },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={clsx("chip", payMethod === m.id && "chip-on")}
+                  onClick={() => setPayMethod(m.id)}
+                  disabled={payBusy}
+                >
+                  {m.icon} {m.label}
+                </button>
+              ))}
+            </div>
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={cancelMarkPaid} disabled={payBusy}>
+                Cancel
+              </NeoButton>
+              <NeoButton onClick={confirmMarkPaid} disabled={payBusy}>
+                {payBusy ? "Saving…" : "Submit"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
+      )}
+      {reassign && (
+        <div className="staff-confirm-backdrop" onClick={cancelReassign} role="presentation">
+          <div
+            className="staff-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reassign-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="reassign-title">Change waiter?</h2>
+            <p>
+              <strong>{reassign.tableLabel}</strong> is handled by{" "}
+              <strong>{reassign.fromName}</strong>. Move it to{" "}
+              <strong>{reassign.toName}</strong>?
+            </p>
+            <p>
+              {reassign.fromName} and floor managers (owner / reception) will be notified of
+              this change.
+            </p>
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={cancelReassign} disabled={reassignBusy}>
+                Cancel
+              </NeoButton>
+              <NeoButton onClick={confirmReassign} disabled={reassignBusy}>
+                {reassignBusy ? "Saving…" : "Yes, reassign"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
+      )}
+      {forceClose && (
+        <div className="staff-confirm-backdrop" onClick={cancelForceClose} role="presentation">
+          <div
+            className="staff-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="force-close-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="force-close-title">Close this table?</h2>
+            <p>
+              Force close <strong>{forceClose.tableLabel}</strong> without taking payment. The
+              table will be freed and this cannot be undone.
+            </p>
+            <div className="staff-confirm-chips">
+              {FORCE_CLOSE_REASONS.map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  className={clsx("chip", forceCloseReason === reason && "chip-on")}
+                  onClick={() => {
+                    setForceCloseReason(reason);
+                    setForceCloseError("");
+                  }}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <NeoTextarea
+              label="Reason"
+              rows={3}
+              required
+              autoFocus
+              placeholder="Why are you force closing this table?"
+              value={forceCloseReason}
+              onChange={(e) => {
+                setForceCloseReason(e.target.value);
+                if (forceCloseError) setForceCloseError("");
+              }}
+            />
+            {forceCloseError && <p className="staff-confirm-error">{forceCloseError}</p>}
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={cancelForceClose} disabled={forceCloseBusy}>
+                Cancel
+              </NeoButton>
+              <NeoButton
+                variant="danger"
+                onClick={confirmForceClose}
+                disabled={forceCloseBusy || forceCloseReason.trim().length < 3}
+              >
+                {forceCloseBusy ? "Closing…" : "Force close table"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
+      )}
       {orderTable && canTakeOrder && cafeAcceptingOrders && (
         <TakeOrderSheet
           tableId={orderTable.id}
@@ -1893,6 +2648,18 @@ export default function StaffDashboard() {
           menu={dash.menu}
           actor={user.email}
           actorName={user.name}
+          actorId={user.id}
+          assignedWaiterId={
+            dash.tables.find((t: { id: string }) => t.id === orderTable.id)?.assignedWaiterId || null
+          }
+          assignedWaiterName={
+            waiters.find(
+              (w: StaffUser) =>
+                w.id ===
+                dash.tables.find((t: { id: string }) => t.id === orderTable.id)?.assignedWaiterId,
+            )?.name || null
+          }
+          session={dash.activeSessions?.find((s: { tableId: string }) => s.tableId === orderTable.id)}
           onClose={() => setOrderTable(null)}
           onSent={(tokenNumber) => {
             setOrderNotice(`Table ${orderTable.label} · token #${tokenNumber} sent to the kitchen.`);

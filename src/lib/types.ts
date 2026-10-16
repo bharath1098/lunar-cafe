@@ -96,6 +96,14 @@ export interface OrderLine {
   rejectReason?: string;
   tokenNumber?: number;
   orderedByMemberId: string;
+  /** Staff member who sent this ticket to the kitchen (waiter / reception / owner). */
+  takenByStaffId?: string;
+  takenByStaffName?: string;
+  /** Table’s assigned waiter at the moment this ticket was sent. */
+  assignedWaiterId?: string;
+  assignedWaiterName?: string;
+  /** True when someone other than the assigned waiter sent the ticket. */
+  isCoverOrder?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -133,6 +141,9 @@ export interface TableSession {
   billGeneratedAt?: string;
   paymentSubmittedAt?: string;
   paymentAwaitingApproval?: boolean;
+  forceClosedAt?: string;
+  forceCloseReason?: string;
+  forceClosedBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -212,6 +223,19 @@ export interface AppSettings {
   hoursEnd: string;
 }
 
+export interface StaffAlert {
+  id: string;
+  type: "waiter_reassigned" | "cover_order";
+  tableId: string;
+  tableLabel: string;
+  message: string;
+  createdAt: string;
+  actorStaffId: string;
+  actorName: string;
+  recipientStaffIds: string[];
+  readByStaffIds: string[];
+}
+
 export interface CafeStore {
   cafeId: string;
   settings: AppSettings;
@@ -222,5 +246,6 @@ export interface CafeStore {
   reservations: Reservation[];
   loyalty: LoyaltyMember[];
   feedback: Feedback[];
+  staffAlerts: StaffAlert[];
   auditLog: { id: string; at: string; actor: string; action: string; detail?: string }[];
 }

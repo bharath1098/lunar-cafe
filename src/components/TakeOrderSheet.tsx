@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Minus, Plus, Search, ShoppingBag, X } from "lucide-react";
+import Image from "next/image";
+import clsx from "clsx";
+import { LayoutGrid, List, Minus, Plus, Search, ShoppingBag, X } from "lucide-react";
+import { CategoryBar } from "@/components/CategoryBar";
 import { NeoButton, NeoInput } from "@/components/Neo";
-import { ScrollHint } from "@/components/ScrollHint";
 import { formatMoney } from "@/lib/cafe";
+import { imageForMenuItem } from "@/lib/media";
 import type { MenuItem } from "@/lib/types";
 
 type DraftLine = {
@@ -25,6 +28,67 @@ type Picker = {
   choices: Record<string, string>;
   notes: string;
   qty: number;
+};
+
+export type TakeOrderSession = {
+  id: string;
+  status: string;
+  members: {
+    id: string;
+    displayName: string;
+    phone?: string;
+    isHost: boolean;
+  }[];
+  orders: {
+    id: string;
+    name: string;
+    variantLabel?: string;
+    choices?: Record<string, string>;
+    notes?: string;
+    unitPrice: number;
+    qty: number;
+    status: string;
+    tokenNumber?: number;
+    orderedByMemberId: string;
+    takenByStaffName?: string;
+    assignedWaiterName?: string;
+    isCoverOrder?: boolean;
+    createdAt: string;
+    rejectReason?: string;
+  }[];
+  cart: {
+    id: string;
+    name: string;
+    variantLabel?: string;
+    qty: number;
+    unitPrice: number;
+    notes?: string;
+  }[];
+  batches: {
+    id: string;
+    tokenNumber: number;
+    createdAt: string;
+    itemIds: string[];
+  }[];
+  bill?: {
+    subtotal: number;
+    taxTotal: number;
+    serviceCharge: number;
+    discountValue: number;
+    grandTotal: number;
+    totalQty: number;
+  };
+  billGeneratedAt?: string;
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  pending_approval: "Waiting for waiter",
+  queued: "In kitchen",
+  preparing: "Preparing",
+  ready: "Ready",
+  served: "Served",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
 };
 
 function lineKey(line: {
@@ -48,12 +112,41 @@ function priceLabel(item: MenuItem) {
   return min === max ? formatMoney(min) : `${formatMoney(min)}–${formatMoney(max)}`;
 }
 
+function statusClass(status: string) {
+  if (status === "rejected" || status === "cancelled") return "is-bad";
+  if (status === "ready") return "is-ready";
+  if (status === "served") return "is-done";
+  return "is-live";
+}
+
+function formatTime(iso: string) {
+  try {
+    return new Intl.DateTimeFormat("en-IN", {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return "";
+  }
+}
+
+function whoOrdered(
+  session: TakeOrderSession | null | undefined,
+  memberId: string,
+) {
+  return session?.members.find((m) => m.id === memberId)?.displayName || "Guest";
+}
+
 export function TakeOrderSheet({
   tableId,
   tableLabel,
   menu,
   actor,
   actorName,
+  actorId,
+  assignedWaiterId,
+  assignedWaiterName,
+  session,
   onClose,
   onSent,
 }: {
@@ -62,6 +155,10 @@ export function TakeOrderSheet({
   menu: MenuItem[];
   actor: string;
   actorName: string;
+  actorId?: string;
+  assignedWaiterId?: string | null;
+  assignedWaiterName?: string | null;
+  session?: TakeOrderSession | null;
   onClose: () => void;
   onSent: (tokenNumber: number) => void;
 }) {
@@ -70,14 +167,39 @@ export function TakeOrderSheet({
     () => ["All", ...new Set(available.map((m) => m.category))],
     [available],
   );
+  const host = session?.members.find((m) => m.isHost) || session?.members[0];
   const [category, setCategory] = useState("All");
   const [query, setQuery] = useState("");
-  const [guestName, setGuestName] = useState("");
-  const [guestPhone, setGuestPhone] = useState("");
+  const [vegOnly, setVegOnly] = useState(false);
+  const [menuView, setMenuView] = useState<"card" | "present">("card");
+  const [moreCatsOpen, setMoreCatsOpen] = useState(false);
+  const [guestId, setGuestId] = useState(host?.id || "");
+  const [guestName, setGuestName] = useState(host?.displayName || "");
+  const [guestPhone, setGuestPhone] = useState(host?.phone || "");
+  const [customGuest, setCustomGuest] = useState(false);
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [picker, setPicker] = useState<Picker | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [pane, setPane] = useState<"menu" | "ticket">("menu");
+  const [showLive, setShowLive] = useState(true);
+
+  useEffect(() => {
+    if (customGuest || !session?.members?.length) return;
+    const member =
+      session.members.find((m) => m.id === guestId) ||
+      session.members.find((m) => m.isHost) ||
+      session.members[0];
+    if (!member) return;
+    setGuestId(member.id);
+    setGuestName(member.displayName || "");
+    setGuestPhone(member.phone || "");
+  }, [session, guestId, customGuest]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("lunar-menu-view");
+    if (saved === "card" || saved === "present") setMenuView(saved);
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -87,20 +209,68 @@ export function TakeOrderSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  function chooseMenuView(next: "card" | "present") {
+    setMenuView(next);
+    localStorage.setItem("lunar-menu-view", next);
+  }
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return available.filter(
       (m) =>
         (category === "All" || m.category === category) &&
+        (!vegOnly || m.isVeg) &&
         (!q ||
           m.name.toLowerCase().includes(q) ||
           m.description.toLowerCase().includes(q) ||
           m.category.toLowerCase().includes(q)),
     );
-  }, [available, category, query]);
+  }, [available, category, query, vegOnly]);
+
+  const grouped = useMemo(() => {
+    const order = categories.filter((c) => c !== "All");
+    const map = new Map<string, MenuItem[]>();
+    for (const cat of order) map.set(cat, []);
+    for (const item of filtered) {
+      const list = map.get(item.category) || [];
+      list.push(item);
+      map.set(item.category, list);
+    }
+    return [...map.entries()].filter(([, list]) => list.length > 0);
+  }, [filtered, categories]);
 
   const total = lines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0);
   const count = lines.reduce((sum, line) => sum + line.qty, 0);
+  const billClosed = Boolean(session?.billGeneratedAt || session?.status === "billing");
+  const fromQr = Boolean(host);
+  const batches = useMemo(() => {
+    if (!session) return [];
+    const known = new Set(session.batches.flatMap((b) => b.itemIds));
+    const grouped = session.batches
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((batch) => ({
+        id: batch.id,
+        tokenNumber: batch.tokenNumber,
+        createdAt: batch.createdAt,
+        items: session.orders.filter((o) => batch.itemIds.includes(o.id)),
+      }))
+      .filter((b) => b.items.length);
+    const leftover = session.orders.filter((o) => !known.has(o.id));
+    if (leftover.length) {
+      grouped.push({
+        id: "other",
+        tokenNumber: leftover[0].tokenNumber || 0,
+        createdAt: leftover[0].createdAt,
+        items: leftover,
+      });
+    }
+    return grouped;
+  }, [session]);
+
+  function goTicketIfMobile() {
+    if (window.matchMedia("(max-width: 800px)").matches) setPane("ticket");
+  }
 
   function addLine(next: Omit<DraftLine, "key">) {
     const key = lineKey(next);
@@ -114,6 +284,8 @@ export function TakeOrderSheet({
       return [...current, { ...next, key }];
     });
     setPicker(null);
+    setShowLive(false);
+    goTicketIfMobile();
   }
 
   function openItem(item: MenuItem) {
@@ -153,11 +325,33 @@ export function TakeOrderSheet({
     );
   }
 
+  function pickGuest(id: string) {
+    setCustomGuest(false);
+    setGuestId(id);
+    const member = session?.members.find((m) => m.id === id);
+    if (member) {
+      setGuestName(member.displayName || "");
+      setGuestPhone(member.phone || "");
+    }
+  }
+
+  function pickNewGuest() {
+    setCustomGuest(true);
+    setGuestId("");
+    setGuestName("");
+    setGuestPhone("");
+  }
+
   async function send() {
     const name = guestName.trim();
     const phone = guestPhone.trim();
     if (!name || !phone) {
       setError("Ask the guest for their name and phone number.");
+      setPane("ticket");
+      return;
+    }
+    if (billClosed) {
+      setError("This table’s bill is already generated.");
       return;
     }
     setSending(true);
@@ -193,144 +387,412 @@ export function TakeOrderSheet({
   const pickerPrice = picker
     ? (picker.item.variants?.find((v) => v.id === picker.variantId)?.price ?? picker.item.price)
     : 0;
+  const isCover = Boolean(assignedWaiterId && actorId && assignedWaiterId !== actorId);
 
   return (
     <div className="take-order-sheet" role="presentation" onClick={onClose}>
       <div
         className="take-order-panel"
+        data-pane={pane}
         role="dialog"
         aria-modal="true"
         aria-label={`Take order for ${tableLabel}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <section className="take-order-menu">
-          <header className="take-order-head">
-            <div>
-              <span className="eyebrow">Table {tableLabel}</span>
-              <h2 className="h-display h-md" style={{ margin: "0.15rem 0 0" }}>
-                Take order
-              </h2>
-            </div>
-            <button type="button" className="take-order-close" onClick={onClose} aria-label="Close">
-              <X size={18} />
-            </button>
-          </header>
-          <label className="take-order-search">
-            <Search size={16} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search the menu"
-              autoFocus
-            />
-          </label>
-          <ScrollHint className="chip-row take-order-chips">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className={category === cat ? "chip chip-on" : "chip"}
-                onClick={() => setCategory(cat)}
-              >
-                {cat}
-              </button>
-            ))}
-          </ScrollHint>
-          <div className="take-order-list">
-            {filtered.map((item) => (
-              <button key={item.id} type="button" className="take-order-row" onClick={() => openItem(item)}>
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>{item.category}</small>
-                </span>
-                <b>{priceLabel(item)}</b>
-                <span className="take-order-add" aria-hidden>
-                  <Plus size={16} />
-                </span>
-              </button>
-            ))}
-            {filtered.length === 0 && <p className="muted">No dishes match that search.</p>}
-          </div>
-        </section>
-
-        <aside className="take-order-ticket">
-          <div className="take-order-ticket-head">
-            <h3 className="h-display h-md" style={{ margin: 0 }}>
-              Ticket
-            </h3>
-            <span className="muted">
-              {count} item{count === 1 ? "" : "s"}
-            </span>
-          </div>
-          <div className="take-order-guest">
-            <NeoInput
-              label="Guest name"
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              placeholder="Who is ordering?"
-              autoComplete="name"
-              required
-            />
-            <NeoInput
-              label="Guest phone"
-              value={guestPhone}
-              onChange={(e) => setGuestPhone(e.target.value)}
-              placeholder="10-digit mobile"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              required
-            />
-          </div>
-          <div className="take-order-lines">
-            {lines.length === 0 && (
-              <p className="muted" style={{ marginTop: 0 }}>
-                Tap a dish to add it. This order goes straight to the kitchen.
+        <header className="take-order-head take-order-top">
+          <div>
+            <span className="eyebrow">Table {tableLabel}</span>
+            <h2 className="h-display h-md" style={{ margin: "0.15rem 0 0" }}>
+              Take order
+            </h2>
+            {fromQr && (
+              <p className="take-order-qr-note">
+                Guest already scanned — details filled from the table.
               </p>
             )}
-            {lines.map((line) => (
-              <div key={line.key} className="take-order-line">
-                <div>
-                  <strong>
-                    {line.name}
-                    {line.variantLabel ? ` · ${line.variantLabel}` : ""}
-                  </strong>
-                  {line.choices && (
-                    <div className="muted" style={{ fontSize: "0.75rem" }}>
-                      {Object.values(line.choices).join(" · ")}
-                    </div>
-                  )}
-                </div>
-                <div className="take-order-line-controls">
-                  <div className="qty-stepper">
-                    <button type="button" onClick={() => changeQty(line.key, -1)} aria-label="Less">
-                      <Minus size={14} />
-                    </button>
-                    <b>{line.qty}</b>
-                    <button type="button" onClick={() => changeQty(line.key, 1)} aria-label="More">
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                  <b>{formatMoney(line.unitPrice * line.qty)}</b>
-                </div>
+            {isCover && (
+              <p className="take-order-cover-note">
+                {assignedWaiterName || "Another waiter"} handles this table. This kitchen
+                ticket will be under your name ({actorName}) so customisations can be traced.
+              </p>
+            )}
+          </div>
+          <button type="button" className="take-order-close" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="take-order-switch" role="tablist" aria-label="Take order sections">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pane === "menu"}
+            className={pane === "menu" ? "is-on" : ""}
+            onClick={() => setPane("menu")}
+          >
+            Menu
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pane === "ticket"}
+            className={pane === "ticket" ? "is-on" : ""}
+            onClick={() => setPane("ticket")}
+          >
+            Ticket{count ? ` · ${count}` : ""}
+          </button>
+        </div>
+
+        <div className="take-order-body">
+          <section className="take-order-menu">
+            <div className="order-toolbar">
+              <label className="search-box">
+                <Search size={16} />
                 <input
-                  className="take-order-note"
-                  value={line.notes || ""}
-                  placeholder="Note for the kitchen"
-                  onChange={(e) => setNotes(line.key, e.target.value)}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search the menu…"
+                  autoFocus
+                />
+              </label>
+              <button
+                type="button"
+                className={clsx("chip veg-toggle", vegOnly && "chip-on")}
+                aria-pressed={vegOnly}
+                onClick={() => setVegOnly((v) => !v)}
+              >
+                <span className="veg-dot" aria-hidden />
+                Veg
+              </button>
+              <div className="view-switch" role="group" aria-label="Menu layout">
+                <button
+                  type="button"
+                  className={clsx(menuView === "card" && "on")}
+                  aria-pressed={menuView === "card"}
+                  onClick={() => chooseMenuView("card")}
+                >
+                  <LayoutGrid size={15} /> Card
+                </button>
+                <button
+                  type="button"
+                  className={clsx(menuView === "present" && "on")}
+                  aria-pressed={menuView === "present"}
+                  onClick={() => chooseMenuView("present")}
+                >
+                  <List size={15} /> Present
+                </button>
+              </div>
+            </div>
+            <CategoryBar
+              categories={categories}
+              value={category}
+              moreOpen={moreCatsOpen}
+              onMoreOpenChange={setMoreCatsOpen}
+              onChange={(next) => {
+                setCategory(next);
+                setMoreCatsOpen(false);
+              }}
+            />
+            <div className="take-order-list">
+              {grouped.map(([cat, list]) => (
+                <section key={cat} className="take-order-menu-group">
+                  <h3 className="menu-cat">{cat}</h3>
+                  <div className={clsx("order-menu-list", menuView === "card" && "is-cards")}>
+                    {list.map((item) => {
+                      const src = item.image || imageForMenuItem(item.name, item.category);
+                      const price = priceLabel(item);
+                      const hasOffer = Boolean(item.discountPercent || item.discountPrice);
+                      if (menuView === "card") {
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="order-menu-card"
+                            onClick={() => openItem(item)}
+                            aria-label={`Add ${item.name}`}
+                          >
+                            <span className="order-menu-card-photo">
+                              <Image src={src} alt="" fill className="cover" sizes="200px" />
+                              {(item.isNew || item.isHighlighted || hasOffer) && (
+                                <span className="order-menu-card-tags">
+                                  {item.isNew && <span className="neo-badge neo-badge-gold">New</span>}
+                                  {item.isHighlighted && (
+                                    <span className="neo-badge neo-badge-ink">Signature</span>
+                                  )}
+                                  {hasOffer && <span className="neo-badge neo-badge-rose">Offer</span>}
+                                </span>
+                              )}
+                            </span>
+                            <span className="order-menu-card-body">
+                              <strong>
+                                <span className={clsx("veg-dot", !item.isVeg && "non")} />
+                                <span className="order-menu-card-title">{item.name}</span>
+                              </strong>
+                              <small>{item.description || " "}</small>
+                              <span className="order-menu-card-foot">
+                                <span className="order-menu-price">{price}</span>
+                                <span className="add-circle" aria-hidden>
+                                  <Plus size={16} />
+                                </span>
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="order-menu-row"
+                          onClick={() => openItem(item)}
+                          aria-label={`Add ${item.name}`}
+                        >
+                          <span className="order-menu-thumb">
+                            <Image src={src} alt="" fill className="cover" sizes="84px" />
+                          </span>
+                          <span className="order-menu-meta">
+                            <strong>
+                              <span
+                                className={clsx("veg-dot", !item.isVeg && "non")}
+                                style={{ marginRight: 6 }}
+                              />
+                              {item.name}
+                            </strong>
+                            <span>
+                              {item.isNew && <span className="neo-badge neo-badge-gold">New</span>}{" "}
+                              {item.isHighlighted && (
+                                <span className="neo-badge neo-badge-ink">Signature</span>
+                              )}
+                            </span>
+                            {item.description && <small>{item.description}</small>}
+                          </span>
+                          <span style={{ textAlign: "right" }}>
+                            <span className="order-menu-price">{price}</span>
+                            <span className="add-circle">
+                              <Plus size={16} />
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+              {grouped.length === 0 && <p className="muted">No dishes match that search.</p>}
+            </div>
+            {count > 0 && (
+              <button type="button" className="take-order-jump" onClick={() => setPane("ticket")}>
+                Review ticket · {count} item{count === 1 ? "" : "s"} · {formatMoney(total)}
+              </button>
+            )}
+          </section>
+
+          <aside className="take-order-ticket">
+            <div className="take-order-ticket-scroll">
+              <div className="take-order-ticket-head">
+                <h3 className="h-display h-md" style={{ margin: 0 }}>
+                  Ticket
+                </h3>
+                <span className="muted">
+                  {count} new item{count === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              {session?.members?.length ? (
+                <div className="take-order-people">
+                  {session.members.map((member) => (
+                    <button
+                      key={member.id}
+                      type="button"
+                      className={guestId === member.id ? "chip chip-on" : "chip"}
+                      onClick={() => pickGuest(member.id)}
+                    >
+                      {member.displayName}
+                      {member.isHost ? " · host" : ""}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className={!guestId ? "chip chip-on" : "chip"}
+                    onClick={pickNewGuest}
+                  >
+                    Someone else
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="take-order-guest">
+                <NeoInput
+                  label="Guest name"
+                  value={guestName}
+                  onChange={(e) => {
+                    setCustomGuest(true);
+                    setGuestId("");
+                    setGuestName(e.target.value);
+                  }}
+                  placeholder="Who is ordering?"
+                  autoComplete="name"
+                  required
+                />
+                <NeoInput
+                  label="Guest phone"
+                  value={guestPhone}
+                  onChange={(e) => {
+                    setCustomGuest(true);
+                    setGuestId("");
+                    setGuestPhone(e.target.value);
+                  }}
+                  placeholder="10-digit mobile"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  required
                 />
               </div>
-            ))}
-          </div>
-          {error && <p className="take-order-error">{error}</p>}
-          <NeoButton
-            className="w-full"
-            disabled={!lines.length || sending || !guestName.trim() || !guestPhone.trim()}
-            onClick={send}
-          >
-            <ShoppingBag size={16} /> {sending ? "Sending…" : `Send to kitchen · ${formatMoney(total)}`}
-          </NeoButton>
-        </aside>
+
+              <div className="take-order-lines">
+                {lines.length === 0 && batches.length === 0 && (
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    Tap a dish to add it. This order goes straight to the kitchen.
+                  </p>
+                )}
+                {lines.map((line) => (
+                  <div key={line.key} className="take-order-line">
+                    <div>
+                      <strong>
+                        {line.name}
+                        {line.variantLabel ? ` · ${line.variantLabel}` : ""}
+                      </strong>
+                      {line.choices && (
+                        <div className="muted" style={{ fontSize: "0.75rem" }}>
+                          {Object.values(line.choices).join(" · ")}
+                        </div>
+                      )}
+                    </div>
+                    <div className="take-order-line-controls">
+                      <div className="qty-stepper">
+                        <button type="button" onClick={() => changeQty(line.key, -1)} aria-label="Less">
+                          <Minus size={14} />
+                        </button>
+                        <b>{line.qty}</b>
+                        <button type="button" onClick={() => changeQty(line.key, 1)} aria-label="More">
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                      <b>{formatMoney(line.unitPrice * line.qty)}</b>
+                    </div>
+                    <input
+                      className="take-order-note"
+                      value={line.notes || ""}
+                      placeholder="Note for the kitchen"
+                      onChange={(e) => setNotes(line.key, e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {session && (batches.length > 0 || session.cart.length > 0 || session.bill) && (
+                <details
+                  className="take-order-live"
+                  open={showLive}
+                  onToggle={(e) => setShowLive(e.currentTarget.open)}
+                >
+                  <summary className="take-order-live-head">
+                    <strong>Already on this table</strong>
+                    {session.bill && session.bill.totalQty > 0 && (
+                      <span>{formatMoney(session.bill.grandTotal)} running</span>
+                    )}
+                  </summary>
+                  {session.cart.length > 0 && (
+                    <div className="take-order-batch">
+                      <div className="take-order-batch-meta">On guest phone · not sent</div>
+                      {session.cart.map((item) => (
+                        <div key={item.id} className="take-order-prior">
+                          <span>
+                            {item.qty}× {item.name}
+                            {item.variantLabel ? ` · ${item.variantLabel}` : ""}
+                          </span>
+                          <b>{formatMoney(item.unitPrice * item.qty)}</b>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {batches.map((batch) => (
+                    <div key={batch.id} className="take-order-batch">
+                      <div className="take-order-batch-meta">
+                        {batch.tokenNumber ? `Token #${batch.tokenNumber}` : "Earlier order"}
+                        {batch.createdAt ? ` · ${formatTime(batch.createdAt)}` : ""}
+                      </div>
+                      {batch.items.map((item) => (
+                        <div key={item.id} className="take-order-prior">
+                          <span>
+                            {item.qty}× {item.name}
+                            {item.variantLabel ? ` · ${item.variantLabel}` : ""}
+                            <small>
+                              {whoOrdered(session, item.orderedByMemberId)}
+                              {item.takenByStaffName
+                                ? item.isCoverOrder && item.assignedWaiterName
+                                  ? ` · taken by ${item.takenByStaffName} (covering ${item.assignedWaiterName})`
+                                  : ` · taken by ${item.takenByStaffName}`
+                                : ""}
+                              {item.notes ? ` · ${item.notes}` : ""}
+                            </small>
+                          </span>
+                          <span className={`take-order-status ${statusClass(item.status)}`}>
+                            {STATUS_LABEL[item.status] || item.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  {session.bill && session.bill.totalQty > 0 && (
+                    <div className="take-order-bill">
+                      <div>
+                        <span>Items</span>
+                        <span>{session.bill.totalQty}</span>
+                      </div>
+                      <div>
+                        <span>Subtotal</span>
+                        <span>{formatMoney(session.bill.subtotal)}</span>
+                      </div>
+                      {session.bill.discountValue > 0 && (
+                        <div>
+                          <span>Discount</span>
+                          <span>−{formatMoney(session.bill.discountValue)}</span>
+                        </div>
+                      )}
+                      {session.bill.serviceCharge > 0 && (
+                        <div>
+                          <span>Service</span>
+                          <span>{formatMoney(session.bill.serviceCharge)}</span>
+                        </div>
+                      )}
+                      <div>
+                        <span>GST</span>
+                        <span>{formatMoney(session.bill.taxTotal)}</span>
+                      </div>
+                      <div className="is-total">
+                        <span>Running bill</span>
+                        <span>{formatMoney(session.bill.grandTotal)}</span>
+                      </div>
+                    </div>
+                  )}
+                </details>
+              )}
+            </div>
+            {error && <p className="take-order-error">{error}</p>}
+            {billClosed && (
+              <p className="take-order-error">Bill already generated — new kitchen tickets are closed.</p>
+            )}
+            <NeoButton
+              className="w-full"
+              disabled={!lines.length || sending || billClosed || !guestName.trim() || !guestPhone.trim()}
+              onClick={send}
+            >
+              <ShoppingBag size={16} /> {sending ? "Sending…" : `Send to kitchen · ${formatMoney(total)}`}
+            </NeoButton>
+          </aside>
+        </div>
 
         {picker && (
           <div className="take-order-picker" role="dialog" aria-label={picker.item.name}>

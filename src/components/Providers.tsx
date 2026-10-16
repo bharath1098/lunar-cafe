@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
+import { ApiLoader } from "@/components/ApiLoader";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
@@ -83,7 +84,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>
+    <PrefsContext.Provider value={value}>
+      {children}
+      <ApiLoader />
+    </PrefsContext.Provider>
   );
 }
 

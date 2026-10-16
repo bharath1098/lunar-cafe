@@ -118,14 +118,19 @@ export default function OrderPage({
     }
   }, [sessionId]);
 
-  const load = useCallback(async () => {
-    const res = await fetch(`/api/session/${sessionId}`, { cache: "no-store" });
+  const load = useCallback(async (quiet = false) => {
+    const res = await fetch(`/api/session/${sessionId}`, {
+      cache: "no-store",
+      headers: quiet ? { "X-Lunar-Quiet": "1" } : undefined,
+    });
     if (res.ok) setData(await res.json());
   }, [sessionId]);
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 2500);
+    const t = setInterval(() => {
+      void load(true);
+    }, 2500);
     return () => clearInterval(t);
   }, [load]);
 

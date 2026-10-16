@@ -16,9 +16,11 @@ export const CAFE = {
   hoursStart: "11:00",
   hoursEnd: "23:30",
   mapsQuery: "Lunar Cafe Jubilee Hills Hyderabad",
-  zomatoUrl: "https://www.zomato.com",
-  swiggyUrl: "https://www.swiggy.com",
-  districtUrl: "https://www.district.in",
+  zomatoUrl: "https://www.zomato.com/hyderabad/lunar-cafe-jubilee-hills",
+  swiggyUrl:
+    "https://www.swiggy.com/restaurants/hyderabad/jubilee-hills/lunar-cafe-1130758/dineout",
+  districtUrl:
+    "https://www.district.in/dining/hyderabad/lunar-cafe-jubilee-hills",
   colors: {
     mint: "#A8C5B8",
     sage: "#7FA390",

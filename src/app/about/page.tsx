@@ -227,7 +227,7 @@ const FACTS = [
   { icon: <QrCode size={18} />, title: "Table QR ordering", text: "One group code. One shared bill." },
   { icon: <Gift size={18} />, title: "Lunar Rewards", text: "100 welcome points · 1 pt / ₹100" },
   { icon: <Globe size={18} />, title: "Three languages", text: "English · हिन्दी · తెలుగు" },
-  { icon: <Truck size={18} />, title: "Delivery partners", text: "Zomato · Swiggy · District" },
+  { icon: <Truck size={18} />, title: "Order or reserve", text: "Zomato · Swiggy Dineout · District" },
   { icon: <Leaf size={18} />, title: `${VEG_SHARE}% vegetarian`, text: "A kitchen that welcomes everyone" },
   { icon: <Users size={18} />, title: "Come as a group", text: "Reserve ahead · walk-ins welcome" },
 ];

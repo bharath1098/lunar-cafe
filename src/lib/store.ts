@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
 import { CAFE } from "./cafe";
-import { generateGroupCode } from "./bill";
+import { billableOrders, generateGroupCode } from "./bill";
 import { readStore, writeStore } from "./db";
 import { imageForMenuItem } from "./media";
 import { SEED_MENU } from "./menu-data";
@@ -17,6 +17,7 @@ import type {
   LoyaltyMember,
   OrderLine,
   Reservation,
+  StaffAlert,
   StaffRole,
   StaffUser,
   TableSection,
@@ -137,6 +138,7 @@ function createSeedStore(): CafeStore {
     reservations: [],
     loyalty: [],
     feedback: [],
+    staffAlerts: [],
     auditLog: [],
   };
 }
@@ -182,6 +184,7 @@ async function loadStore(): Promise<CafeStore> {
   if (global.__lunarStore) {
     global.__lunarStore.settings = normalizeSettings(global.__lunarStore.settings);
     global.__lunarStore.menu = withImages(global.__lunarStore.menu);
+    global.__lunarStore.staffAlerts = global.__lunarStore.staffAlerts || [];
     return global.__lunarStore;
   }
 
@@ -189,6 +192,7 @@ async function loadStore(): Promise<CafeStore> {
   if (existing) {
     existing.settings = normalizeSettings(existing.settings);
     existing.menu = withImages(existing.menu);
+    existing.staffAlerts = existing.staffAlerts || [];
     global.__lunarStore = existing;
     return existing;
   }
@@ -197,6 +201,7 @@ async function loadStore(): Promise<CafeStore> {
   const seed = imported ?? createSeedStore();
   seed.settings = normalizeSettings(seed.settings);
   seed.menu = withImages(seed.menu);
+  seed.staffAlerts = seed.staffAlerts || [];
   await writeStore(seed);
   if (imported) archiveLegacyJson();
   global.__lunarStore = seed;
@@ -218,6 +223,47 @@ async function audit(actor: string, action: string, detail?: string) {
     detail,
   });
   store.auditLog = store.auditLog.slice(0, 500);
+}
+
+function staffByEmail(store: CafeStore, email: string) {
+  return store.staff.find((s) => s.email === email);
+}
+
+function waiterLabel(store: CafeStore, waiterId: string | null | undefined) {
+  if (!waiterId) return "Unassigned";
+  return store.staff.find((s) => s.id === waiterId)?.name || "Waiter";
+}
+
+function tableShortLabel(table: CafeTable) {
+  return table.label || table.id.replace(/^lunar-/, "");
+}
+
+function higherRoleIds(store: CafeStore, exceptStaffId?: string) {
+  return store.staff
+    .filter(
+      (s) =>
+        s.active &&
+        (s.role === "owner" || s.role === "reception") &&
+        s.id !== exceptStaffId,
+    )
+    .map((s) => s.id);
+}
+
+function pushStaffAlert(
+  store: CafeStore,
+  alert: Omit<StaffAlert, "id" | "createdAt" | "readByStaffIds">,
+) {
+  const recipients = [...new Set(alert.recipientStaffIds)].filter(Boolean);
+  if (!recipients.length) return;
+  store.staffAlerts = store.staffAlerts || [];
+  store.staffAlerts.unshift({
+    ...alert,
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    recipientStaffIds: recipients,
+    readByStaffIds: [],
+  });
+  store.staffAlerts = store.staffAlerts.slice(0, 200);
 }
 
 export async function getStore(): Promise<CafeStore> {
@@ -459,7 +505,10 @@ export async function staffTakeOrder(
   const guestName = guest.name.trim() || "Guest";
   await ensureLoyalty(phone, guestName);
 
-  const staffUser = store.staff.find((s) => s.email === actor);
+  const staffUser = staffByEmail(store, actor);
+  const assignedWaiterId = table.assignedWaiterId;
+  const assignedWaiterName = assignedWaiterId ? waiterLabel(store, assignedWaiterId) : undefined;
+  const isCoverOrder = Boolean(staffUser && assignedWaiterId && staffUser.id !== assignedWaiterId);
   const now = new Date().toISOString();
 
   const prepared = drafts.map((draft) => {
@@ -560,6 +609,11 @@ export async function staffTakeOrder(
     status: "queued" as const,
     tokenNumber,
     orderedByMemberId: memberId,
+    takenByStaffId: staffUser?.id,
+    takenByStaffName: staffUser?.name || actor,
+    assignedWaiterId: assignedWaiterId || undefined,
+    assignedWaiterName,
+    isCoverOrder: isCoverOrder || undefined,
     createdAt: now,
     updatedAt: now,
   }));
@@ -573,7 +627,28 @@ export async function staffTakeOrder(
     itemIds: newItems.map((i) => i.id),
   });
   session.updatedAt = now;
-  await audit(actor, "waiter_order", `${tableId} token ${tokenNumber}`);
+  await audit(
+    actor,
+    isCoverOrder ? "cover_order" : "waiter_order",
+    `${tableId} token ${tokenNumber}${isCoverOrder ? ` covering ${assignedWaiterName}` : ""}`,
+  );
+
+  if (isCoverOrder && assignedWaiterId && staffUser) {
+    const label = tableShortLabel(table);
+    const recipients = new Set(higherRoleIds(store, staffUser.id));
+    recipients.add(assignedWaiterId);
+    recipients.delete(staffUser.id);
+    pushStaffAlert(store, {
+      type: "cover_order",
+      tableId: table.id,
+      tableLabel: label,
+      actorStaffId: staffUser.id,
+      actorName: staffUser.name,
+      recipientStaffIds: [...recipients],
+      message: `${staffUser.name} sent token #${tokenNumber} on Table ${label} (assigned to ${assignedWaiterName}). Customisations on that ticket are under ${staffUser.name}.`,
+    });
+  }
+
   await persist();
   return { session, tokenNumber, items: newItems };
 }
@@ -819,13 +894,18 @@ export async function updateBilling(
 export async function generateBill(sessionId: string, actor: string) {
   const store = await loadStore();
   const session = await mustSession(sessionId);
-  if (!session.billRequestedAt) {
-    throw new Error("Guest has not requested the bill yet");
-  }
   if (session.billGeneratedAt && session.billNumber) {
     return session;
   }
+  if (billableOrders(session.orders).length === 0) {
+    throw new Error("No items to bill yet");
+  }
   const now = new Date().toISOString();
+  const staffUser = staffByEmail(store, actor);
+  if (!session.billRequestedAt) {
+    session.billRequestedAt = now;
+    session.billRequestedByName = staffUser?.name || actor;
+  }
   session.status = "billing";
   session.billGeneratedAt = now;
   session.billNumber = store.settings.nextBillNumber++;
@@ -919,11 +999,19 @@ async function finalizePaidSession(
   return session;
 }
 
-export async function forceCloseSession(sessionId: string, actor: string) {
+export async function forceCloseSession(sessionId: string, actor: string, reason: string) {
+  const trimmed = reason.trim();
+  if (trimmed.length < 3) {
+    throw new Error("Enter a reason (at least 3 characters) before force closing");
+  }
   const session = await mustSession(sessionId);
+  const now = new Date().toISOString();
   session.status = "closed";
-  session.updatedAt = new Date().toISOString();
-  await audit(actor, "force_close", session.tableId);
+  session.forceClosedAt = now;
+  session.forceCloseReason = trimmed;
+  session.forceClosedBy = actor;
+  session.updatedAt = now;
+  await audit(actor, "force_close", `${session.tableId}: ${trimmed}`);
   await persist();
   return session;
 }
@@ -932,10 +1020,60 @@ export async function assignWaiter(tableId: string, waiterId: string | null, act
   const store = await loadStore();
   const table = store.tables.find((t) => t.id === tableId);
   if (!table) throw new Error("Table not found");
+  const previousId = table.assignedWaiterId;
+  if (previousId === waiterId) return table;
+
+  const actorUser = staffByEmail(store, actor);
+  const actorName = actorUser?.name || actor;
+  const fromName = waiterLabel(store, previousId);
+  const toName = waiterLabel(store, waiterId);
+  const label = tableShortLabel(table);
+
   table.assignedWaiterId = waiterId;
-  await audit(actor, "assign_waiter", `${tableId} -> ${waiterId}`);
+  await audit(actor, "assign_waiter", `${tableId}: ${fromName} -> ${toName}`);
+
+  const recipients = new Set(higherRoleIds(store, actorUser?.id));
+  if (previousId && previousId !== actorUser?.id) recipients.add(previousId);
+  if (waiterId && waiterId !== actorUser?.id) recipients.add(waiterId);
+  pushStaffAlert(store, {
+    type: "waiter_reassigned",
+    tableId: table.id,
+    tableLabel: label,
+    actorStaffId: actorUser?.id || "",
+    actorName,
+    recipientStaffIds: [...recipients],
+    message: `Table ${label} waiter changed: ${fromName} → ${toName} (by ${actorName}).`,
+  });
+
   await persist();
   return table;
+}
+
+export async function acknowledgeStaffAlert(alertId: string, actor: string) {
+  const store = await loadStore();
+  const user = staffByEmail(store, actor);
+  if (!user) throw new Error("Staff not found");
+  const alert = (store.staffAlerts || []).find((a) => a.id === alertId);
+  if (!alert) return { ok: true as const };
+  if (!alert.readByStaffIds.includes(user.id)) alert.readByStaffIds.push(user.id);
+  await persist();
+  return { ok: true as const };
+}
+
+export async function acknowledgeAllStaffAlerts(actor: string) {
+  const store = await loadStore();
+  const user = staffByEmail(store, actor);
+  if (!user) throw new Error("Staff not found");
+  for (const alert of store.staffAlerts || []) {
+    if (
+      alert.recipientStaffIds.includes(user.id) &&
+      !alert.readByStaffIds.includes(user.id)
+    ) {
+      alert.readByStaffIds.push(user.id);
+    }
+  }
+  await persist();
+  return { ok: true as const };
 }
 
 export async function upsertMenuItem(item: CafeStore["menu"][number], actor: string) {
@@ -1391,6 +1529,7 @@ export async function clearTransactionalData(actor: string) {
   store.reservations = [];
   store.loyalty = [];
   store.feedback = [];
+  store.staffAlerts = [];
   store.auditLog = [];
   store.settings.nextBillNumber = 1;
   store.settings.nextTokenNumber = 1;

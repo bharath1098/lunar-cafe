@@ -14,6 +14,7 @@ import type {
   OrderLine,
   Reservation,
   SessionMember,
+  StaffAlert,
   StaffUser,
   TableSession,
 } from "./types";
@@ -28,7 +29,11 @@ declare global {
   var __lunarDb: Client | undefined;
   // eslint-disable-next-line no-var
   var __lunarDbReady: Promise<Client> | undefined;
+  // eslint-disable-next-line no-var
+  var __lunarSchemaVersion: number | undefined;
 }
+
+const SCHEMA_VERSION = 2;
 
 /** True when TURSO_DATABASE_URL points at a remote Turso DB (Vercel / prod). */
 export function isRemoteTurso() {
@@ -164,6 +169,11 @@ CREATE TABLE IF NOT EXISTS order_lines (
   reject_reason TEXT,
   token_number INTEGER,
   ordered_by_member_id TEXT NOT NULL,
+  taken_by_staff_id TEXT,
+  taken_by_staff_name TEXT,
+  assigned_waiter_id TEXT,
+  assigned_waiter_name TEXT,
+  is_cover_order INTEGER,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   sort_order INTEGER NOT NULL
@@ -215,6 +225,20 @@ CREATE TABLE IF NOT EXISTS feedback (
   sort_order INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS staff_alerts (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  table_id TEXT NOT NULL,
+  table_label TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  actor_staff_id TEXT NOT NULL,
+  actor_name TEXT NOT NULL,
+  recipient_staff_ids_json TEXT NOT NULL,
+  read_by_staff_ids_json TEXT NOT NULL,
+  sort_order INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
   at TEXT NOT NULL,
@@ -232,8 +256,36 @@ CREATE INDEX IF NOT EXISTS idx_orders_session ON order_lines(session_id);
 CREATE INDEX IF NOT EXISTS idx_batches_session ON order_batches(session_id);
 `;
 
+const COLUMN_MIGRATIONS = [
+  "ALTER TABLE settings ADD COLUMN orders_open INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE settings ADD COLUMN allow_after_hours INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE settings ADD COLUMN hours_start TEXT NOT NULL DEFAULT '11:00'",
+  "ALTER TABLE settings ADD COLUMN hours_end TEXT NOT NULL DEFAULT '23:30'",
+  "ALTER TABLE order_lines ADD COLUMN taken_by_staff_id TEXT",
+  "ALTER TABLE order_lines ADD COLUMN taken_by_staff_name TEXT",
+  "ALTER TABLE order_lines ADD COLUMN assigned_waiter_id TEXT",
+  "ALTER TABLE order_lines ADD COLUMN assigned_waiter_name TEXT",
+  "ALTER TABLE order_lines ADD COLUMN is_cover_order INTEGER",
+];
+
+async function applySchema(client: Client) {
+  if (global.__lunarSchemaVersion === SCHEMA_VERSION) return;
+  await client.executeMultiple(SCHEMA);
+  for (const sql of COLUMN_MIGRATIONS) {
+    try {
+      await client.execute(sql);
+    } catch {
+      /* column already exists */
+    }
+  }
+  global.__lunarSchemaVersion = SCHEMA_VERSION;
+}
+
 async function getDb(): Promise<Client> {
-  if (global.__lunarDb) return global.__lunarDb;
+  if (global.__lunarDb) {
+    await applySchema(global.__lunarDb);
+    return global.__lunarDb;
+  }
   if (!global.__lunarDbReady) {
     global.__lunarDbReady = (async () => {
       const client = createClient({
@@ -249,25 +301,14 @@ async function getDb(): Promise<Client> {
           /* local file quirks */
         }
       }
-      await client.executeMultiple(SCHEMA);
-      // Migrate older DBs that predate ordering-hours columns.
-      for (const sql of [
-        "ALTER TABLE settings ADD COLUMN orders_open INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE settings ADD COLUMN allow_after_hours INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE settings ADD COLUMN hours_start TEXT NOT NULL DEFAULT '11:00'",
-        "ALTER TABLE settings ADD COLUMN hours_end TEXT NOT NULL DEFAULT '23:30'",
-      ]) {
-        try {
-          await client.execute(sql);
-        } catch {
-          /* column already exists */
-        }
-      }
+      await applySchema(client);
       global.__lunarDb = client;
       return client;
     })();
   }
-  return global.__lunarDbReady;
+  const client = await global.__lunarDbReady;
+  await applySchema(client);
+  return client;
 }
 
 function nullable(value: string | number | null | undefined): SqlValue {
@@ -369,6 +410,11 @@ function readOrderLine(row: Row): OrderLine {
     rejectReason: textOpt(row.reject_reason),
     tokenNumber: numOpt(row.token_number),
     orderedByMemberId: text(row.ordered_by_member_id),
+    takenByStaffId: textOpt(row.taken_by_staff_id),
+    takenByStaffName: textOpt(row.taken_by_staff_name),
+    assignedWaiterId: textOpt(row.assigned_waiter_id),
+    assignedWaiterName: textOpt(row.assigned_waiter_name),
+    isCoverOrder: flag(row.is_cover_order),
     createdAt: text(row.created_at),
     updatedAt: text(row.updated_at),
   };
@@ -438,7 +484,7 @@ export async function readStore(): Promise<CafeStore | null> {
   const settings = settingsResult.rows[0] as Row | undefined;
   if (!settings) return null;
 
-  const [memberRows, cartRows, orderRows, batchRows, tableRows, staffRows, menuRows, sessionRows, reservationRows, loyaltyRows, feedbackRows, auditRows] =
+  const [memberRows, cartRows, orderRows, batchRows, tableRows, staffRows, menuRows, sessionRows, reservationRows, loyaltyRows, feedbackRows, alertRows, auditRows] =
     await Promise.all([
       rowsOf(db, "SELECT * FROM session_members ORDER BY sort_order"),
       rowsOf(db, "SELECT * FROM cart_lines ORDER BY sort_order"),
@@ -451,6 +497,7 @@ export async function readStore(): Promise<CafeStore | null> {
       rowsOf(db, "SELECT * FROM reservations ORDER BY sort_order"),
       rowsOf(db, "SELECT * FROM loyalty ORDER BY sort_order"),
       rowsOf(db, "SELECT * FROM feedback ORDER BY sort_order"),
+      rowsOf(db, "SELECT * FROM staff_alerts ORDER BY sort_order"),
       rowsOf(db, "SELECT * FROM audit_log ORDER BY sort_order"),
     ]);
 
@@ -557,6 +604,20 @@ export async function readStore(): Promise<CafeStore | null> {
         createdAt: text(row.created_at),
       }),
     ),
+    staffAlerts: alertRows.map(
+      (row): StaffAlert => ({
+        id: text(row.id),
+        type: text(row.type) as StaffAlert["type"],
+        tableId: text(row.table_id),
+        tableLabel: text(row.table_label),
+        message: text(row.message),
+        createdAt: text(row.created_at),
+        actorStaffId: text(row.actor_staff_id),
+        actorName: text(row.actor_name),
+        recipientStaffIds: parseJson<string[]>(row.recipient_staff_ids_json) ?? [],
+        readByStaffIds: parseJson<string[]>(row.read_by_staff_ids_json) ?? [],
+      }),
+    ),
     auditLog: auditRows.map((row) => ({
       id: text(row.id),
       at: text(row.at),
@@ -578,6 +639,7 @@ export async function writeStore(store: CafeStore) {
     "DELETE FROM sessions",
     "DELETE FROM reservations",
     "DELETE FROM feedback",
+    "DELETE FROM staff_alerts",
     "DELETE FROM audit_log",
     "DELETE FROM loyalty",
     "DELETE FROM menu_items",
@@ -766,11 +828,13 @@ export async function writeStore(store: CafeStore) {
         sql: `INSERT INTO order_lines (
       id, session_id, menu_item_id, name, variant_label, choices_json, notes,
       unit_price, qty, status, reject_reason, token_number, ordered_by_member_id,
-      created_at, updated_at, sort_order
+      taken_by_staff_id, taken_by_staff_name, assigned_waiter_id, assigned_waiter_name,
+      is_cover_order, created_at, updated_at, sort_order
     ) VALUES (
       :id, :session_id, :menu_item_id, :name, :variant_label, :choices_json, :notes,
       :unit_price, :qty, :status, :reject_reason, :token_number, :ordered_by_member_id,
-      :created_at, :updated_at, :sort_order
+      :taken_by_staff_id, :taken_by_staff_name, :assigned_waiter_id, :assigned_waiter_name,
+      :is_cover_order, :created_at, :updated_at, :sort_order
     )`,
         args: {
           id: line.id,
@@ -786,6 +850,11 @@ export async function writeStore(store: CafeStore) {
           reject_reason: nullable(line.rejectReason),
           token_number: nullable(line.tokenNumber),
           ordered_by_member_id: line.orderedByMemberId,
+          taken_by_staff_id: nullable(line.takenByStaffId),
+          taken_by_staff_name: nullable(line.takenByStaffName),
+          assigned_waiter_id: nullable(line.assignedWaiterId),
+          assigned_waiter_name: nullable(line.assignedWaiterName),
+          is_cover_order: bit(line.isCoverOrder),
           created_at: line.createdAt,
           updated_at: line.updatedAt,
           sort_order: lineOrder,
@@ -865,6 +934,31 @@ export async function writeStore(store: CafeStore) {
         session_id: nullable(entry.sessionId),
         status: entry.status,
         created_at: entry.createdAt,
+        sort_order,
+      },
+    });
+  });
+
+  (store.staffAlerts ?? []).slice(0, 200).forEach((entry, sort_order) => {
+    statements.push({
+      sql: `INSERT INTO staff_alerts (
+      id, type, table_id, table_label, message, created_at, actor_staff_id, actor_name,
+      recipient_staff_ids_json, read_by_staff_ids_json, sort_order
+    ) VALUES (
+      :id, :type, :table_id, :table_label, :message, :created_at, :actor_staff_id, :actor_name,
+      :recipient_staff_ids_json, :read_by_staff_ids_json, :sort_order
+    )`,
+      args: {
+        id: entry.id,
+        type: entry.type,
+        table_id: entry.tableId,
+        table_label: entry.tableLabel,
+        message: entry.message,
+        created_at: entry.createdAt,
+        actor_staff_id: entry.actorStaffId,
+        actor_name: entry.actorName,
+        recipient_staff_ids_json: JSON.stringify(entry.recipientStaffIds ?? []),
+        read_by_staff_ids_json: JSON.stringify(entry.readByStaffIds ?? []),
         sort_order,
       },
     });

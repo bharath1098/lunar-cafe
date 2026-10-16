@@ -64,6 +64,7 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" | "th
 
   useEffect(() => {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const mobile = window.matchMedia("(max-width: 960px)").matches;
     const path = pathRef.current;
     const root = rootRef.current;
     if (!path || !root) return;
@@ -75,8 +76,9 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" | "th
       root.style.setProperty("--lit", String(0.12 + lit * 0.88));
     };
 
-    if (reduce) {
-      apply(Math.PI); // stay a calm full moon
+    // phones + the full-page thin sky stay on a still moon (no extra rAF)
+    if (reduce || mobile || variant === "thin") {
+      apply(reduce ? Math.PI : START_PHASE);
       return;
     }
 
@@ -92,7 +94,7 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" | "th
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [variant]);
 
   const stars = useMemo(() => {
     const r = rng(7);

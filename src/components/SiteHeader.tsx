@@ -55,7 +55,7 @@ export function SiteHeader() {
           <Link href="/" className="brand" aria-label="Lunar Cafe home">
             <span className="brand-mark">
               <Image
-                src={CAFE_MEDIA.goldSign}
+                src={CAFE_MEDIA.logo}
                 alt=""
                 fill
                 sizes="42px"
@@ -177,7 +177,7 @@ export function SiteFooter() {
             <div className="brand">
               <span className="brand-mark">
                 <Image
-                  src={CAFE_MEDIA.goldSign}
+                  src={CAFE_MEDIA.logo}
                   alt=""
                   fill
                   sizes="42px"

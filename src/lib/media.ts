@@ -12,6 +12,7 @@ export const CAFE_MEDIA = {
   wings: "/media/cafe/wings.jpg",
   nightSign: "/media/cafe/night-sign.webp",
   goldSign: "/media/cafe/gold-sign.webp",
+  logo: "/media/cafe/lunar-logo.jpg",
   arch: "/media/cafe/floral-arch.webp",
   patio: "/media/cafe/patio.webp",
 } as const;
