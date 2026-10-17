@@ -1,4 +1,4 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 
 /* =========================================================
    LUNAR CAFE â€” design system
@@ -2080,7 +2080,7 @@ h4 {
   background: color-mix(in srgb, var(--cream-100) 32%, transparent);
 }
 .home-canvas .hm-sig {
-  background: transparent;
+  background: #071c1a;
 }
 .home-canvas .hm-voices {
   background:
@@ -2177,7 +2177,6 @@ h4 {
     backdrop-filter: none;
   }
   .hm-rooms,
-  .hm-sig,
   .hm-crave,
   .hm-ritual,
   .hm-voices,
@@ -10866,131 +10865,361 @@ body:has(.guest-table-bar) {
   outline-offset: 3px;
 }
 
-/* ---- signature: compact plate + copy ---- */
+/* ---- signature: full-screen scroll along the semi-circle ---- */
 .hm-sig {
-  padding: clamp(2rem, calc(3.2 * var(--vw)), 2.8rem) 0;
-  background: transparent;
+  --sig-steps: 4;
+  position: relative;
+  height: calc(var(--sig-steps) * 100dvh);
+  background: #071c1a;
   color: var(--on-dark);
 }
-.hm-sig-inner {
-  display: grid;
-  grid-template-columns: minmax(220px, 360px) minmax(0, 1fr);
-  align-items: center;
-  gap: clamp(1.4rem, calc(3 * var(--vw)), 3rem);
-}
-.hm-plate {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 5 / 4;
-  margin: 0;
-  border-radius: 12px;
+.hm-sig-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 100dvh;
   overflow: hidden;
-  background: var(--forest-900);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow:
-    0 22px 48px -22px rgba(0, 0, 0, 0.7),
-    0 0 40px -12px rgba(189, 234, 221, 0.16);
-}
-.hm-plate-frame {
-  position: absolute;
-  inset: 0;
-}
-.hm-plate .cover {
-  object-position: 50% 42%;
-  filter: saturate(1.08) contrast(1.04);
+  background:
+    radial-gradient(ellipse at 78% 50%, rgba(143, 211, 195, 0.1), transparent 46%),
+    #071c1a;
 }
 .hm-sig-copy {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  padding-top: 5.6rem;
+  padding-bottom: 1.4rem;
+  max-width: min(1680px, 100%);
+}
+.hm-sig-heading {
   display: grid;
+  gap: 0.45rem;
   justify-items: start;
-  text-align: left;
+  max-width: 28rem;
 }
-.hm-sig-title {
-  margin: 0.55rem 0 0;
-  max-width: 16ch;
-}
-.hm-sig-title em {
-  font-style: italic;
-  font-weight: 500;
+.hm-sig-heading .eyebrow {
   color: var(--gold-300);
 }
-.hm-sig-lede {
-  color: rgba(251, 245, 232, 0.78);
-  max-width: 34rem;
-  text-align: left;
-  margin-top: 0.55rem;
+.hm-sig-heading .hm-title {
+  margin: 0;
+  max-width: 12ch;
 }
-.hm-sig-pills {
+.hm-sig-heading .hm-title em {
+  color: var(--gold-300);
+}
+.hm-sig-detail {
+  min-height: 0;
+  max-width: min(36rem, 48vw);
+}
+.hm-sig-detail-inner {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+  animation: hm-sig-in 0.35s ease;
+}
+@keyframes hm-sig-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.hm-sig-idx {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  color: var(--gold-300);
+}
+.hm-sig-idx span {
+  position: relative;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hm-sig-idx span::before,
+.hm-sig-idx span::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 1.1rem;
+  height: 1px;
+  background: color-mix(in srgb, var(--gold-300) 55%, transparent);
+  transform: translateX(-50%);
+}
+.hm-sig-idx span::before {
+  top: -0.28rem;
+}
+.hm-sig-idx span::after {
+  bottom: -0.18rem;
+}
+.hm-sig-idx i {
+  font-style: normal;
+  opacity: 0.55;
+}
+.hm-sig-tags {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 0.45rem;
-  list-style: none;
-  margin: 1rem 0 1.15rem;
-  padding: 0;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
 }
-.hm-sig-pills li {
-  display: grid;
-  gap: 0.08rem;
-  padding: 0.45rem 0.9rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+.hm-sig-tags > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   background: rgba(8, 28, 26, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(12px);
 }
-.hm-sig-pills small {
+.hm-sig-tags > span:first-child::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.hm-sig-tags > .is-veg {
+  color: var(--gold-300);
+}
+.hm-sig-tags > .is-nonveg {
+  color: #e8a09a;
+}
+.hm-sig-cat {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(251, 246, 234, 0.55);
+}
+.hm-sig-name {
+  margin: 0.1rem 0 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(1.55rem, calc(3.2 * var(--vw)), 2.35rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+  max-width: 16ch;
+}
+.hm-sig-desc {
+  margin: 0;
+  max-width: 34rem;
+  color: rgba(251, 245, 232, 0.78);
+}
+.hm-sig-buy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem 1rem;
+  margin-top: 0.25rem;
+  width: 100%;
+}
+.hm-sig-price {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(1.55rem, calc(2.4 * var(--vw)), 1.85rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.hm-sig-cta {
+  border-radius: 10px;
+}
+.hm-sig .btn-gold {
+  background: var(--gold-300);
+  color: var(--forest-950);
+  box-shadow: none;
+}
+.hm-sig .btn-gold:hover:not(:disabled) {
+  background: #fff;
+}
+.hm-sig-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  max-width: min(46vw, 34rem);
+}
+.hm-sig-thumbs {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.85rem;
+}
+.hm-sig-thumbs button {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.45rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+.hm-sig-thumbs button.on {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+.hm-sig-thumb {
+  position: relative;
+  display: block;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12);
+}
+.hm-sig-thumbs button.on .hm-sig-thumb {
+  box-shadow: 0 0 0 2px var(--gold-300);
+}
+.hm-sig-thumb-bar {
+  display: block;
+  width: 1.6rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--gold-300);
+}
+
+/* Dial sits off the right edge so its left rim is the semi-circle the plate rides. */
+.hm-sig-dial {
+  position: absolute;
+  top: 46%;
+  right: -58%;
+  z-index: 2;
+  width: min(150vw, 920px);
+  aspect-ratio: 1;
+  translate: 0 -50%;
+  pointer-events: none;
+}
+.hm-sig-arc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 40%, rgba(255, 255, 255, 0.12), transparent 32%),
+    url("/media/sky/moon.jpg") center / 136% no-repeat;
+  box-shadow: none;
+  mask-image: radial-gradient(circle, #000 96%, transparent 100%);
+  -webkit-mask-image: radial-gradient(circle, #000 96%, transparent 100%);
+}
+.hm-sig-arc-ring {
+  display: none;
+}
+.hm-sig-stars {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: none;
+}
+.hm-sig-intro {
+  margin: 0.35rem 0 0;
+  max-width: 34ch;
+  color: rgba(251, 246, 234, 0.72);
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+.hm-sig-note {
+  margin: 0.15rem 0 0;
+  max-width: 38ch;
+  color: rgba(251, 245, 232, 0.62);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.hm-sig-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+}
+.hm-sig-facts li {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 6.5rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 28, 26, 0.4);
+}
+.hm-sig-facts small {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   font-size: 0.62rem;
   font-weight: 700;
   opacity: 0.55;
 }
-.hm-sig-pills b {
+.hm-sig-facts b {
   font-family: var(--font-display), Georgia, serif;
   font-weight: 500;
-  font-size: 0.98rem;
+  font-size: 0.95rem;
 }
-.hm-sig-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 1rem 1.4rem;
+.hm-sig-pair {
+  margin: 0.15rem 0 0;
+  font-size: 0.88rem;
+  color: rgba(251, 246, 234, 0.62);
 }
-.hm-sig-rail {
-  display: flex;
-  gap: 0.35rem;
-  margin: 0;
-}
-.hm-sig-rail button {
-  position: relative;
-  min-width: 3.1rem;
-  padding: 0.45rem 0.2rem 0.55rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--on-dark);
-  font-family: var(--font-display), Georgia, serif;
-  font-size: 1.15rem;
-  letter-spacing: -0.03em;
-  cursor: pointer;
-  opacity: 0.4;
-  transition:
-    opacity 0.25s ease,
-    color 0.25s ease;
-}
-.hm-sig-rail button.on {
-  opacity: 1;
+.hm-sig-pair b {
   color: var(--gold-300);
+  font-weight: 600;
 }
-.hm-sig-bar {
+.hm-sig-rim {
+  display: none;
+}
+.hm-sig-plate {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: var(--gold-300);
-  transform-origin: left center;
-  animation: hm-sig-bar linear forwards;
+  width: 46%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  will-change: left, top, transform, opacity;
 }
+.hm-sig-plate::after {
+  content: none;
+}
+.hm-sig-plate .cover {
+  border-radius: 50%;
+  object-position: 50% 45%;
+  filter: saturate(1.08) contrast(1.04);
+  pointer-events: none;
+}
+.hm-sig-menu {
+  position: absolute;
+  right: max(1.25rem, 4vw);
+  bottom: 1.6rem;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--gold-300);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  opacity: 0.9;
+}
+.hm-sig-menu:hover {
+  opacity: 1;
+}
+
 @keyframes hm-sig-bar {
   from {
     transform: scaleX(0);
@@ -11000,13 +11229,130 @@ body:has(.guest-table-bar) {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hm-sig-bar {
+  .hm-sig-bar,
+  .hm-room-bar {
     animation: none;
     transform: scaleX(1);
   }
 }
-.hm-sig-btn {
-  border-radius: 10px;
+
+@media (min-width: 961px) {
+  .hm-sig-dial {
+    top: 50%;
+    right: -24vw;
+    width: min(112vh, 1100px);
+  }
+  .hm-sig-plate {
+    width: 48%;
+  }
+  .hm-sig-copy {
+    padding-top: 6.5rem;
+    padding-bottom: 2.2rem;
+  }
+  .hm-sig-detail,
+  .hm-sig-foot {
+    max-width: min(36rem, 42vw);
+  }
+}
+
+.hm-sig-stage {
+  display: contents;
+}
+
+@media (max-width: 960px) {
+  .hm-sig-sticky {
+    display: grid;
+    grid-template-rows: auto 58vw auto minmax(0, 1fr);
+    grid-template-areas:
+      "head"
+      "stage"
+      "detail"
+      "foot";
+    align-content: start;
+    row-gap: 0.15rem;
+    padding: 4.15rem 0 1rem;
+  }
+  .hm-sig-copy {
+    display: contents;
+    height: auto;
+    padding: 0;
+  }
+  .hm-sig-heading,
+  .hm-sig-detail,
+  .hm-sig-foot {
+    position: relative;
+    z-index: 3;
+    max-width: none;
+    padding-inline: 1.2rem;
+  }
+  .hm-sig-heading {
+    grid-area: head;
+  }
+  .hm-sig-heading .hm-title {
+    font-size: 2.15rem;
+    line-height: 1.05;
+  }
+  .hm-sig-intro,
+  .hm-sig-note,
+  .hm-sig-facts,
+  .hm-sig-pair,
+  .hm-sig-menu {
+    display: none;
+  }
+  .hm-sig-stage {
+    display: block;
+    grid-area: stage;
+    position: relative;
+    height: 58vw;
+    overflow: visible;
+  }
+  .hm-sig-dial {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    right: auto;
+    z-index: 1;
+    width: 210vw;
+    translate: 0 -50%;
+  }
+  .hm-sig-plate {
+    width: 26%;
+  }
+  .hm-sig-detail {
+    grid-area: detail;
+    padding-top: 0.15rem;
+  }
+  .hm-sig-detail-inner {
+    gap: 0.32rem;
+  }
+  .hm-sig-idx span::before,
+  .hm-sig-idx span::after {
+    display: none;
+  }
+  .hm-sig-name {
+    font-size: 1.85rem;
+    max-width: 14ch;
+    line-height: 1.05;
+  }
+  .hm-sig-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .hm-sig-foot {
+    grid-area: foot;
+    align-self: end;
+    justify-content: center;
+    padding-top: 0.85rem;
+    padding-bottom: 0.35rem;
+  }
+  .hm-sig-buy {
+    margin-bottom: 0.15rem;
+  }
+  .hm-sig-thumbs {
+    justify-content: center;
+  }
 }
 
 /* ---- craving mosaic ---- */
@@ -11647,18 +11993,6 @@ body:has(.guest-table-bar) {
   .hm-room-d {
     display: none;
   }
-  .hm-sig-inner {
-    grid-template-columns: 1fr;
-    gap: 1.1rem;
-  }
-  .hm-plate {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    margin: 0;
-  }
-  .hm-sig-copy {
-    justify-items: start;
-  }
   .hm-wide {
     display: none;
   }
@@ -11888,14 +12222,6 @@ body:has(.guest-table-bar) {
   }
   .hm-room-d {
     display: none;
-  }
-  .hm-plate {
-    aspect-ratio: 16 / 9;
-    border-radius: 10px;
-  }
-  .hm-sig-pills li {
-    min-width: 0;
-    flex: 1 1 auto;
   }
   .hm-crave-mosaic {
     grid-template-columns: repeat(12, minmax(0, 1fr));

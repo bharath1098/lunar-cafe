@@ -11,7 +11,6 @@ import {
   Gift,
   MapPin,
   QrCode,
-  Sparkles,
   Star,
   Users,
 } from "lucide-react";
@@ -20,11 +19,11 @@ import { Reveal } from "@/components/Reveal";
 import { ScrollHint } from "@/components/ScrollHint";
 import { LunarSky } from "@/components/LunarSky";
 import { HeroCarousel } from "@/components/HeroCarousel";
+import { SignatureCarousel } from "@/components/SignatureCarousel";
 import { usePrefs } from "@/components/Providers";
 import { CAFE } from "@/lib/cafe";
-import { CAFE_MEDIA, imageForMenuItem } from "@/lib/media";
+import { CAFE_MEDIA } from "@/lib/media";
 import { EXPLORE } from "@/lib/explore";
-import { slugify } from "@/lib/slug";
 
 const TASTES = EXPLORE;
 
@@ -58,43 +57,6 @@ const ROOMS = [
   },
 ];
 
-const SIGNATURES = [
-  {
-    name: "Chipotle Chicken Tikka",
-    em: "Tikka",
-    d: "Fresh. Smoky. Served on river stones with mint chutney.",
-    facts: [
-      { k: "Heat", v: "Smoky chipotle" },
-      { k: "Served", v: "River stones" },
-      { k: "Finish", v: "Mint chutney" },
-    ],
-    img: CAFE_MEDIA.signature,
-  },
-  {
-    name: "Lunar Black Beauty",
-    em: "Beauty",
-    d: "Milk, espresso, choco charcoal and honey — our house latte.",
-    facts: [
-      { k: "Base", v: "Espresso" },
-      { k: "Milk", v: "Steamed" },
-      { k: "Finish", v: "Honey" },
-    ],
-    img: imageForMenuItem("Lunar Black Beauty", "Hot Coffees"),
-  },
-  {
-    name: "Creamy Burrata Bliss",
-    em: "Bliss",
-    d: "Creamy burrata with tomato and basil, from the wood oven.",
-    facts: [
-      { k: "Base", v: "Wood-fired" },
-      { k: "Cheese", v: "Burrata" },
-      { k: "Finish", v: "Basil" },
-    ],
-    img: imageForMenuItem("Creamy Burrata Bliss", "Pizzas"),
-  },
-].map((s) => ({ ...s, href: `/menu/${slugify(s.name)}` }));
-
-const SIG_MS = 5200;
 const ROOM_MS = 5200;
 
 const REVIEWS = [
@@ -119,9 +81,6 @@ export default function HomePage() {
   const { tr } = usePrefs();
   const [room, setRoom] = useState(0);
   const [roomPaused, setRoomPaused] = useState(false);
-  const [sig, setSig] = useState(0);
-  const [sigPaused, setSigPaused] = useState(false);
-  const dish = SIGNATURES[sig];
 
   useEffect(() => {
     if (roomPaused) return;
@@ -132,16 +91,6 @@ export default function HomePage() {
     );
     return () => window.clearTimeout(t);
   }, [room, roomPaused]);
-
-  useEffect(() => {
-    if (sigPaused) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const t = window.setTimeout(
-      () => setSig((n) => (n + 1) % SIGNATURES.length),
-      SIG_MS,
-    );
-    return () => window.clearTimeout(t);
-  }, [sig, sigPaused]);
 
   return (
     <PublicShell>
@@ -323,78 +272,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* SIGNATURE — several house dishes */}
-      <section
-        className="hm-sig"
-        onMouseEnter={() => setSigPaused(true)}
-        onMouseLeave={() => setSigPaused(false)}
-      >
-        <div className="wrap hm-sig-inner">
-          <div className="hm-plate">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={dish.img + dish.name}
-                className="hm-plate-frame"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.35 }}
-              >
-                <Image
-                  src={dish.img}
-                  alt={dish.name}
-                  fill
-                  className="cover"
-                  sizes="(max-width: 960px) 92vw, 380px"
-                />
-              </motion.div>
-            </AnimatePresence>
-          </div>
-          <div className="hm-sig-copy">
-            <span className="eyebrow">
-              <Sparkles size={14} /> House signatures
-            </span>
-            <h2 className="h-display h-lg hm-sig-title">
-              {dish.name.replace(dish.em, "").trim()} <em>{dish.em}</em>
-            </h2>
-            <p className="hm-lede hm-sig-lede">{dish.d}</p>
-            <ul className="hm-sig-pills">
-              {dish.facts.map((f) => (
-                <li key={f.k}>
-                  <small>{f.k}</small>
-                  <b>{f.v}</b>
-                </li>
-              ))}
-            </ul>
-            <div className="hm-sig-actions">
-              <div className="hm-sig-rail" role="tablist" aria-label="House signatures">
-                {SIGNATURES.map((s, i) => (
-                  <button
-                    key={s.name}
-                    type="button"
-                    role="tab"
-                    aria-selected={i === sig}
-                    aria-label={s.name}
-                    className={i === sig ? "on" : undefined}
-                    onClick={() => setSig(i)}
-                  >
-                    {String(i + 1).padStart(2, "0")}
-                    {i === sig && (
-                      <span
-                        className="hm-sig-bar"
-                        style={{ animationDuration: `${SIG_MS}ms`, animationPlayState: sigPaused ? "paused" : "running" }}
-                      />
-                    )}
-                  </button>
-                ))}
-              </div>
-              <Link href={dish.href} className="btn btn-gold hm-sig-btn">
-                View dish <ArrowRight size={16} />
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
+      <SignatureCarousel />
 
       {/* CRAVE */}
       <section className="hm-crave">
