@@ -2152,23 +2152,18 @@ h4 {
   .sky-petals,
   .sky-aurora,
   .sky-mist,
-  .sky-clouds,
-  .shooting-star {
+  .sky-clouds {
     display: none !important;
   }
-  .sky-stars i {
-    animation: none;
-    box-shadow: none;
-  }
-  .sky-stars i:nth-child(n + 14) {
+  .sky-stars i:nth-child(n + 32) {
     display: none;
   }
-  .moon-halo-wrap,
-  .sky-moon,
-  .cloud {
-    animation: none;
+  .shooting-star.s3,
+  .shooting-star.s4 {
+    display: none;
   }
   .cloud {
+    animation: none;
     filter: none;
   }
   .hero-slide.active .cover.is-ready {
@@ -2356,17 +2351,13 @@ h4 {
 .taste-strip::-webkit-scrollbar {
   display: none;
 }
-.scroll-hint-wrap:has(.taste-strip) .scroll-hint {
-  top: calc(50% + 0.1rem);
-  background: var(--forest-900);
-  color: var(--gold-300);
-  border-color: rgba(255, 255, 255, 0.18);
+.scroll-hint-wrap.is-loop-strip {
+  touch-action: pan-y;
+  cursor: grab;
+  user-select: none;
 }
-.scroll-hint-wrap:has(.taste-strip) .scroll-hint-end {
-  right: 0.55rem;
-}
-.scroll-hint-wrap:has(.taste-strip) .scroll-hint-start {
-  left: 0.55rem;
+.scroll-hint-wrap.is-loop-strip:active {
+  cursor: grabbing;
 }
 .taste-track {
   display: flex;

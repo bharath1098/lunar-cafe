@@ -76,8 +76,9 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" | "th
       root.style.setProperty("--lit", String(0.12 + lit * 0.88));
     };
 
-    // phones + the full-page thin sky stay on a still moon (no extra rAF)
-    if (reduce || mobile || variant === "thin") {
+    // The full-page thin sky stays still (it covers the whole scroll).
+    // Phones still get a slow phase change, just at a lower frame rate.
+    if (reduce || variant === "thin") {
       apply(reduce ? Math.PI : START_PHASE);
       return;
     }
@@ -85,9 +86,10 @@ export function LunarSky({ variant = "hero" }: { variant?: "hero" | "page" | "th
     let raf = 0;
     let last = 0;
     const t0 = performance.now();
+    const minFrame = mobile ? 80 : 40;
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
-      if (now - last < 40) return; // ~25 fps is plenty for a slow phase change
+      if (now - last < minFrame) return;
       last = now;
       const phi = START_PHASE + ((now - t0) / 1000 / CYCLE_SECONDS) * Math.PI * 2;
       apply(phi);
