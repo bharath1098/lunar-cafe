@@ -1,12 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { MessageSquareHeart } from "lucide-react";
+import { CheckCircle2, MessageSquareHeart } from "lucide-react";
 import { PageHero, PublicShell } from "@/components/PublicShell";
 import { Reveal } from "@/components/Reveal";
 import { NeoButton, NeoInput, NeoSelect, NeoTextarea } from "@/components/Neo";
 import { CAFE_MEDIA } from "@/lib/media";
 import { loadPublicData } from "@/lib/public-data";
+import { readUtm } from "@/lib/utm";
 
 type Fb = {
   id: string;
@@ -19,6 +20,8 @@ type Fb = {
 export default function FeedbackPage() {
   const [list, setList] = useState<Fb[]>([]);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   function load() {
     loadPublicData()
@@ -32,24 +35,48 @@ export default function FeedbackPage() {
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setError("");
     const form = e.currentTarget;
     const fd = new FormData(form);
-    await fetch("/api/staff/action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "feedback_submit",
-        data: {
-          category: String(fd.get("category")),
-          type: String(fd.get("type")),
-          message: String(fd.get("message")),
-          rating: Number(fd.get("rating") || 5),
-        },
-      }),
-    });
-    setDone(true);
-    form.reset();
-    load();
+    const message = String(fd.get("message") || "").trim();
+    const rating = Number(fd.get("rating") || 5);
+    if (message.length < 4) {
+      setError("Please write a short message.");
+      return;
+    }
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+      setError("Rating should be a number from 1 to 5.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "feedback_submit",
+          utm: readUtm(),
+          data: {
+            category: String(fd.get("category")),
+            type: String(fd.get("type")),
+            message,
+            rating,
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Could not send that. Please try again.");
+        return;
+      }
+      setDone(true);
+      form.reset();
+      load();
+    } catch {
+      setError("Could not send that. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -64,11 +91,16 @@ export default function FeedbackPage() {
         <div className="wrap split" style={{ alignItems: "start" }}>
           <Reveal>
             <div className="neo-card" style={{ padding: "2rem" }}>
-              {done && (
-                <p style={{ fontWeight: 700, color: "#2e8b57" }}>
-                  Thank you — the owner will review it.
-                </p>
-              )}
+              {done ? (
+                <div className="form-success" role="status">
+                  <CheckCircle2 size={42} />
+                  <h2 className="h-display h-md">Thank you</h2>
+                  <p className="muted">The owner will review it before anything is shown.</p>
+                  <NeoButton variant="ghost" onClick={() => setDone(false)}>
+                    Send another
+                  </NeoButton>
+                </div>
+              ) : (
               <form onSubmit={onSubmit} style={{ display: "grid", gap: "1rem" }}>
                 <div className="form-2">
                   <NeoSelect name="type" label="Type" defaultValue="compliment">
@@ -91,8 +123,16 @@ export default function FeedbackPage() {
                   defaultValue={5}
                 />
                 <NeoTextarea name="message" label="Your message" rows={4} required />
-                <NeoButton type="submit">Send feedback</NeoButton>
+                {error && (
+                  <p className="form-error" role="alert">
+                    {error}
+                  </p>
+                )}
+                <NeoButton type="submit" disabled={busy}>
+                  {busy ? "Sending…" : "Send feedback"}
+                </NeoButton>
               </form>
+              )}
             </div>
           </Reveal>
           <div style={{ display: "grid", gap: "1rem" }}>

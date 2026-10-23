@@ -10,6 +10,8 @@ export const CAFE = {
   city: "Hyderabad",
   phone: "081792 28935",
   phoneDisplay: "+91 81792 28935",
+  email: "hello@lunar.cafe",
+  updated: "23 October 2026",
   upiId: "lunarcafe@upi",
   gstin: "36ANDPA3116F2ZO",
   hours: "11:00 AM – 11:30 PM",

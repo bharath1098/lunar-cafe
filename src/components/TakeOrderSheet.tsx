@@ -147,6 +147,7 @@ export function TakeOrderSheet({
   assignedWaiterId,
   assignedWaiterName,
   session,
+  deskChannel,
   onClose,
   onSent,
 }: {
@@ -159,6 +160,8 @@ export function TakeOrderSheet({
   assignedWaiterId?: string | null;
   assignedWaiterName?: string | null;
   session?: TakeOrderSession | null;
+  /** When set, this sheet logs a Swiggy, Zomato, or takeaway order instead of a table. */
+  deskChannel?: "swiggy" | "zomato" | "takeaway";
   onClose: () => void;
   onSent: (tokenNumber: number) => void;
 }) {
@@ -176,6 +179,8 @@ export function TakeOrderSheet({
   const [guestId, setGuestId] = useState(host?.id || "");
   const [guestName, setGuestName] = useState(host?.displayName || "");
   const [guestPhone, setGuestPhone] = useState(host?.phone || "");
+  const [externalOrderId, setExternalOrderId] = useState("");
+  const [orderNote, setOrderNote] = useState("");
   const [customGuest, setCustomGuest] = useState(false);
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [picker, setPicker] = useState<Picker | null>(null);
@@ -345,8 +350,19 @@ export function TakeOrderSheet({
   async function send() {
     const name = guestName.trim();
     const phone = guestPhone.trim();
-    if (!name || !phone) {
-      setError("Ask the guest for their name and phone number.");
+    const phoneRequired = !deskChannel || deskChannel === "takeaway";
+    const orderNo = externalOrderId.trim();
+    if (!name || (phoneRequired && !phone)) {
+      setError(
+        phoneRequired
+          ? "Ask the guest for their name and phone number."
+          : "Enter the guest name.",
+      );
+      setPane("ticket");
+      return;
+    }
+    if ((deskChannel === "swiggy" || deskChannel === "zomato") && !orderNo) {
+      setError("Enter the order number from the Swiggy or Zomato app.");
       setPane("ticket");
       return;
     }
@@ -356,24 +372,39 @@ export function TakeOrderSheet({
     }
     setSending(true);
     setError("");
+    const linesPayload = lines.map((line) => ({
+      menuItemId: line.menuItemId,
+      variantId: line.variantId,
+      choices: line.choices,
+      notes: line.notes,
+      qty: line.qty,
+    }));
     const res = await fetch("/api/staff/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "take_order",
-        tableId,
-        actor,
-        actorName,
-        guestName: name,
-        guestPhone: phone,
-        lines: lines.map((line) => ({
-          menuItemId: line.menuItemId,
-          variantId: line.variantId,
-          choices: line.choices,
-          notes: line.notes,
-          qty: line.qty,
-        })),
-      }),
+      body: JSON.stringify(
+        deskChannel
+          ? {
+              action: "create_online_order",
+              channel: deskChannel,
+              actor,
+              actorName,
+              guestName: name,
+              guestPhone: phone,
+              externalOrderId: orderNo,
+              note: orderNote.trim(),
+              lines: linesPayload,
+            }
+          : {
+              action: "take_order",
+              tableId,
+              actor,
+              actorName,
+              guestName: name,
+              guestPhone: phone,
+              lines: linesPayload,
+            },
+      ),
     });
     const json = await res.json();
     setSending(false);
@@ -401,7 +432,7 @@ export function TakeOrderSheet({
       >
         <header className="take-order-head take-order-top">
           <div>
-            <span className="eyebrow">Table {tableLabel}</span>
+            <span className="eyebrow">{deskChannel ? tableLabel : `Table ${tableLabel}`}</span>
             <h2 className="h-display h-md" style={{ margin: "0.15rem 0 0" }}>
               Take order
             </h2>
@@ -598,7 +629,7 @@ export function TakeOrderSheet({
                 </span>
               </div>
 
-              {session?.members?.length ? (
+              {session?.members?.length && !deskChannel ? (
                 <div className="take-order-people">
                   {session.members.map((member) => (
                     <button
@@ -622,6 +653,15 @@ export function TakeOrderSheet({
               ) : null}
 
               <div className="take-order-guest">
+                {(deskChannel === "swiggy" || deskChannel === "zomato") && (
+                  <NeoInput
+                    label="Order number"
+                    value={externalOrderId}
+                    onChange={(e) => setExternalOrderId(e.target.value)}
+                    placeholder="From the Swiggy or Zomato app"
+                    required
+                  />
+                )}
                 <NeoInput
                   label="Guest name"
                   value={guestName}
@@ -635,19 +675,26 @@ export function TakeOrderSheet({
                   required
                 />
                 <NeoInput
-                  label="Guest phone"
+                  label={deskChannel && deskChannel !== "takeaway" ? "Guest phone (optional)" : "Guest phone"}
                   value={guestPhone}
                   onChange={(e) => {
                     setCustomGuest(true);
                     setGuestId("");
                     setGuestPhone(e.target.value);
                   }}
-                  placeholder="10-digit mobile"
-                  type="tel"
+                  placeholder={deskChannel && deskChannel !== "takeaway" ? "Leave blank if the app hides it" : "10-digit mobile"}
                   inputMode="tel"
                   autoComplete="tel"
-                  required
+                  required={!deskChannel || deskChannel === "takeaway"}
                 />
+                {deskChannel && (
+                  <NeoInput
+                    label="Note (optional)"
+                    value={orderNote}
+                    onChange={(e) => setOrderNote(e.target.value)}
+                    placeholder="Rider, packing, or pickup"
+                  />
+                )}
               </div>
 
               <div className="take-order-lines">
@@ -786,7 +833,14 @@ export function TakeOrderSheet({
             )}
             <NeoButton
               className="w-full"
-              disabled={!lines.length || sending || billClosed || !guestName.trim() || !guestPhone.trim()}
+              disabled={
+                !lines.length ||
+                sending ||
+                billClosed ||
+                !guestName.trim() ||
+                ((!deskChannel || deskChannel === "takeaway") && !guestPhone.trim()) ||
+                ((deskChannel === "swiggy" || deskChannel === "zomato") && !externalOrderId.trim())
+              }
               onClick={send}
             >
               <ShoppingBag size={16} /> {sending ? "Sending…" : `Send to kitchen · ${formatMoney(total)}`}

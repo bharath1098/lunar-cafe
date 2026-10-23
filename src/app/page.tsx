@@ -187,7 +187,14 @@ export default function HomePage() {
                   style={{ "--c": t.accent } as CSSProperties}
                   tabIndex={copy === 1 ? -1 : undefined}
                 >
-                  <Image src={t.img} alt={t.name} fill className="cover" sizes="240px" />
+                  <Image
+                    src={t.img}
+                    alt={t.name}
+                    fill
+                    className="cover"
+                    sizes="240px"
+                    draggable={false}
+                  />
                   <span className="taste-index">
                     {String(i + 1).padStart(2, "0")}
                   </span>

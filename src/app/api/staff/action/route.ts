@@ -5,6 +5,7 @@ import {
   acknowledgeStaffAlert,
   approveGuestPayment,
   approveOrderItems,
+  approveTableSwitch,
   assignWaiter,
   closeAndPay,
   createReservation,
@@ -14,6 +15,7 @@ import {
   deleteStaffUser,
   deleteTable,
   ensureLoyalty,
+  extendCafeHours,
   forceCloseSession,
   generateBill,
   getSession,
@@ -22,10 +24,16 @@ import {
   regenerateGroupCode,
   clearTransactionalData,
   setCafeOrderingControls,
+  changeOwnPassword,
+  leaveLoyalty,
   rejectOrderItem,
+  rejectTableSwitch,
   setKitchenStatus,
   setStaffActive,
   staffTakeOrder,
+  createOnlineOrder,
+  cancelOnlineOrder,
+  handOverOnlineOrder,
   submitFeedback,
   transferHost,
   updateBilling,
@@ -36,11 +44,43 @@ import {
 } from "@/lib/store";
 import { randomUUID } from "crypto";
 import type { MenuItem } from "@/lib/types";
+import { recordCampaign } from "@/lib/campaign-log";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { isPublicAction, readStaffRequest, roleAllows } from "@/lib/staff-gate";
+import { campaignLabel, type Utm } from "@/lib/utm";
+
+function withCampaign(note: unknown, utm: Utm | null | undefined) {
+  const label = campaignLabel(utm);
+  const text = String(note || "").trim();
+  if (!label) return text || undefined;
+  return [text, `Campaign: ${label}`].filter(Boolean).join("\n");
+}
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, actor = "staff" } = body;
+    const action = String(body.action || "");
+    const session = readStaffRequest(req);
+
+    if (isPublicAction(action)) {
+      const ip = clientIp(req);
+      if (!rateLimit(`public:${ip}:${action}`, 20, 10 * 60_000)) {
+        return NextResponse.json(
+          { error: "Too many requests. Please wait a moment and try again." },
+          { status: 429 },
+        );
+      }
+    } else if (!session) {
+      return NextResponse.json({ error: "Please sign in again" }, { status: 401 });
+    } else if (!roleAllows(action, session.role)) {
+      return NextResponse.json(
+        { error: "You don't have permission for that" },
+        { status: 403 },
+      );
+    }
+
+    const actor = session?.email || "guest";
+    await getStore();
 
     switch (action) {
       case "approve":
@@ -69,6 +109,27 @@ export async function POST(req: NextRequest) {
             phone: body.guestPhone,
           }),
         );
+      case "create_online_order":
+        return NextResponse.json(
+          await createOnlineOrder(body.channel, body.lines || [], actor, {
+            name: body.guestName,
+            phone: body.guestPhone,
+            externalOrderId: body.externalOrderId,
+            note: body.note,
+          }),
+        );
+      case "cancel_online_order":
+        return NextResponse.json({
+          session: await cancelOnlineOrder(
+            body.sessionId,
+            actor,
+            String(body.reason || ""),
+          ),
+        });
+      case "hand_over_online":
+        return NextResponse.json({
+          session: await handOverOnlineOrder(body.sessionId, actor),
+        });
       case "kitchen_status":
         return NextResponse.json({
           session: await setKitchenStatus(
@@ -136,6 +197,28 @@ export async function POST(req: NextRequest) {
             String(body.reason || ""),
           ),
         });
+      case "approve_table_switch":
+        return NextResponse.json({
+          session: await approveTableSwitch(
+            body.sessionId,
+            body.toTableId,
+            actor,
+            body.reason ? String(body.reason) : undefined,
+          ),
+        });
+      case "reject_table_switch":
+        return NextResponse.json({
+          session: await rejectTableSwitch(body.sessionId, actor),
+        });
+      case "staff_table_switch":
+        return NextResponse.json({
+          session: await approveTableSwitch(
+            body.sessionId,
+            body.toTableId,
+            actor,
+            String(body.reason || ""),
+          ),
+        });
       case "menu_upsert": {
         const item = body.item as MenuItem;
         if (!item.id) item.id = randomUUID();
@@ -144,20 +227,36 @@ export async function POST(req: NextRequest) {
       case "menu_delete":
         await deleteMenuItem(body.id, actor);
         return NextResponse.json({ ok: true });
-      case "reservation_create":
+      case "reservation_create": {
+        recordCampaign("reservation_create", body.utm);
         return NextResponse.json({
-          reservation: await createReservation(body.data),
+          reservation: await createReservation({
+            ...body.data,
+            note: withCampaign(body.data?.note, body.utm),
+          }),
         });
+      }
       case "reservation_update":
         return NextResponse.json({
           reservation: await updateReservation(body.id, body.patch, actor),
         });
       case "loyalty_join":
+        recordCampaign("loyalty_join", body.utm);
         return NextResponse.json({
           member: await ensureLoyalty(body.phone, body.name || "Guest"),
         });
-      case "feedback_submit":
-        return NextResponse.json({ feedback: await submitFeedback(body.data) });
+      case "loyalty_leave":
+        return NextResponse.json({ member: await leaveLoyalty(body.phone) });
+      case "feedback_submit": {
+        const message = String(body.data?.message || "").trim();
+        if (message.length < 4) {
+          return NextResponse.json({ error: "Please write a short message." }, { status: 400 });
+        }
+        recordCampaign("feedback_submit", body.utm);
+        return NextResponse.json({
+          feedback: await submitFeedback({ ...body.data, message }),
+        });
+      }
       case "clear_transactions":
         return NextResponse.json(await clearTransactionalData(actor));
       case "set_ordering":
@@ -171,6 +270,10 @@ export async function POST(req: NextRequest) {
             },
             actor,
           ),
+        });
+      case "extend_hours":
+        return NextResponse.json({
+          ordering: await extendCafeHours(String(body.hoursEnd || ""), actor),
         });
       case "feedback_moderate":
         return NextResponse.json({
@@ -217,6 +320,18 @@ export async function POST(req: NextRequest) {
       case "table_delete":
         await deleteTable(body.tableId, actor);
         return NextResponse.json({ ok: true });
+      case "staff_change_password":
+        await changeOwnPassword(actor, body.currentPassword, body.password);
+        return NextResponse.json({ ok: true });
+      case "export_backup": {
+        const store = await getStore();
+        const { staff, ...rest } = store;
+        return NextResponse.json({
+          exportedAt: new Date().toISOString(),
+          ...rest,
+          staff: staff.map(({ password: _password, ...member }) => member),
+        });
+      }
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }

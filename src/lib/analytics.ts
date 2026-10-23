@@ -1,6 +1,6 @@
 import { billableOrders, calculateBill } from "./bill";
-import { getStore } from "./store";
-import type { CafeStore, TableSession } from "./types";
+import { getStore, isDineInSession } from "./store";
+import type { CafeStore, OrderChannel, TableSession } from "./types";
 
 export type StatsRange = "today" | "7d" | "30d" | "all" | "custom";
 
@@ -49,6 +49,8 @@ export interface AnalyticsResult {
     bills: number;
   }[];
   sections: { section: string; revenue: number; bills: number }[];
+  /** Dine-in, takeaway, Swiggy, and Zomato sales in this period. */
+  channels: { channel: OrderChannel; label: string; revenue: number; bills: number; items: number }[];
 }
 
 type PaidEntry = {
@@ -105,6 +107,7 @@ function summarise(entries: PaidEntry[]): PeriodTotals {
     tax += bill.taxTotal;
     roundOff += bill.roundOff;
 
+    if (!isDineInSession(session)) continue;
     const mins =
       (new Date(session.paidAt as string).getTime() -
         new Date(session.createdAt).getTime()) /
@@ -174,9 +177,13 @@ export function computeAnalytics(
   const now = new Date();
   const today = startOfDay(now);
 
-  // Only real sales: closed ₹0 bills (nothing billable) would skew every average.
+  // Real sales: paid dine-in / takeaway bills, plus handed-over Swiggy and Zomato orders.
   const paid: PaidEntry[] = store.sessions
-    .filter((s) => s.paidAt && s.billNumber)
+    .filter(
+      (s) =>
+        Boolean(s.paidAt) &&
+        (Boolean(s.billNumber) || (s.channel != null && s.channel !== "dine_in")),
+    )
     .map((session) => ({
       session,
       at: new Date(session.paidAt as string),
@@ -258,12 +265,23 @@ export function computeAnalytics(
   >();
   const tableMap = new Map<string, { revenue: number; bills: number }>();
   const sectionMap = new Map<string, { revenue: number; bills: number }>();
+  const channelMap = new Map<
+    OrderChannel,
+    { revenue: number; bills: number; items: number }
+  >();
 
   const menuById = new Map(store.menu.map((m) => [m.id, m]));
   const tableById = new Map(store.tables.map((t) => [t.id, t]));
+  const channelOf = (session: TableSession): OrderChannel =>
+    session.channel === "takeaway" ||
+    session.channel === "swiggy" ||
+    session.channel === "zomato"
+      ? session.channel
+      : "dine_in";
 
   for (const { session, at, bill } of inRange) {
     const total = bill.grandTotal;
+    const channel = channelOf(session);
 
     const day = dailyMap.get(dayKey(at));
     if (day) {
@@ -282,23 +300,34 @@ export function computeAnalytics(
     weekdayMap[at.getDay()].revenue += total;
     weekdayMap[at.getDay()].bills += 1;
 
-    const method = session.paymentMethod || "cash";
-    const p = paymentMap.get(method) ?? { revenue: 0, bills: 0 };
-    p.revenue += total;
-    p.bills += 1;
-    paymentMap.set(method, p);
+    const ch = channelMap.get(channel) ?? { revenue: 0, bills: 0, items: 0 };
+    ch.revenue += total;
+    ch.bills += 1;
+    ch.items += bill.totalQty;
+    channelMap.set(channel, ch);
 
-    const table = tableById.get(session.tableId);
-    const t = tableMap.get(session.tableId) ?? { revenue: 0, bills: 0 };
-    t.revenue += total;
-    t.bills += 1;
-    tableMap.set(session.tableId, t);
+    // Counter payment mix only — Swiggy and Zomato are prepaid on the platform.
+    if (channel === "dine_in" || channel === "takeaway") {
+      const method = session.paymentMethod || "cash";
+      const p = paymentMap.get(method) ?? { revenue: 0, bills: 0 };
+      p.revenue += total;
+      p.bills += 1;
+      paymentMap.set(method, p);
+    }
 
-    const section = table?.section ?? "unknown";
-    const sec = sectionMap.get(section) ?? { revenue: 0, bills: 0 };
-    sec.revenue += total;
-    sec.bills += 1;
-    sectionMap.set(section, sec);
+    if (isDineInSession(session)) {
+      const table = tableById.get(session.tableId);
+      const t = tableMap.get(session.tableId) ?? { revenue: 0, bills: 0 };
+      t.revenue += total;
+      t.bills += 1;
+      tableMap.set(session.tableId, t);
+
+      const section = table?.section ?? "unknown";
+      const sec = sectionMap.get(section) ?? { revenue: 0, bills: 0 };
+      sec.revenue += total;
+      sec.bills += 1;
+      sectionMap.set(section, sec);
+    }
 
     for (const line of billableOrders(session.orders)) {
       const menu = menuById.get(line.menuItemId);
@@ -382,5 +411,24 @@ export function computeAnalytics(
       revenue: money(v.revenue),
       bills: v.bills,
     })),
+    channels: (
+      [
+        ["dine_in", "Dine-in"],
+        ["takeaway", "Takeaway"],
+        ["swiggy", "Swiggy"],
+        ["zomato", "Zomato"],
+      ] as const
+    )
+      .map(([channel, label]) => {
+        const v = channelMap.get(channel) ?? { revenue: 0, bills: 0, items: 0 };
+        return {
+          channel,
+          label,
+          revenue: money(v.revenue),
+          bills: v.bills,
+          items: v.items,
+        };
+      })
+      .filter((c) => c.bills > 0),
   };
 }

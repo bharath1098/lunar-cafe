@@ -6,6 +6,7 @@ import { FormEvent, use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { KeyRound, ShieldCheck } from "lucide-react";
+import { ClosingSoonBanner } from "@/components/ClosingSoonBanner";
 import { NeoButton, NeoInput } from "@/components/Neo";
 import {
   orderPath,
@@ -97,6 +98,7 @@ export default function TableJoinPage({
 
   return (
     <main className="join-page">
+      <ClosingSoonBanner />
       <div className="join-hero">
         <Image
           src={CAFE_MEDIA.interior}

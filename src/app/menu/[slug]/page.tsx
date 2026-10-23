@@ -5,6 +5,7 @@ import { getPublicMenu } from "@/lib/store";
 import { withSlugs } from "@/lib/slug";
 import { ExploreView } from "@/components/explore/ExploreView";
 import { DishView } from "@/components/explore/DishView";
+import { metaDescription } from "@/lib/site";
 
 // the menu is edited by staff at any time, so always read it fresh
 export const dynamic = "force-dynamic";
@@ -21,13 +22,20 @@ export async function generateMetadata({
   const { slug } = await params;
   const flavour = getExplore(slug);
   if (flavour) {
-    return { title: `${flavour.name} | Lunar Cafe`, description: flavour.story };
+    return {
+      title: `${flavour.name} at Lunar Cafe Jubilee Hills`,
+      description: metaDescription(flavour.story),
+      alternates: { canonical: `/menu/${slug}` },
+    };
   }
   const dish = (await loadMenu()).find((d) => d.slug === slug);
   if (!dish) return {};
   return {
-    title: `${dish.name} | Lunar Cafe`,
-    description: dish.description || `${dish.name}, from our ${dish.category} menu at Lunar Cafe.`,
+    title: dish.name,
+    description: metaDescription(
+      dish.description || `${dish.name} from the ${dish.category} menu at Lunar Cafe, Jubilee Hills.`,
+    ),
+    alternates: { canonical: `/menu/${slug}` },
   };
 }
 

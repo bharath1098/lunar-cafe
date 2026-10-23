@@ -14,42 +14,71 @@ import {
 import { DateField, TimeField } from "@/components/DateTimePickers";
 import { CAFE } from "@/lib/cafe";
 import { CAFE_MEDIA } from "@/lib/media";
+import { indianMobile } from "@/lib/phone";
+import { readUtm } from "@/lib/utm";
 
 export default function ReservePage() {
   const [ok, setOk] = useState(false);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     const form = e.currentTarget;
     const fd = new FormData(form);
+    const name = String(fd.get("name") || "").trim();
+    const phone = indianMobile(String(fd.get("phone") || ""));
     const date = String(fd.get("date") || "");
     const time = String(fd.get("time") || "");
+    const partySize = Number(fd.get("partySize"));
+    if (name.length < 2) {
+      setError("Please enter your name.");
+      return;
+    }
+    if (!phone) {
+      setError("Enter a valid 10-digit mobile number.");
+      return;
+    }
     if (!date || !time) {
       setError("Please enter a valid date and time.");
       return;
     }
-    const data = {
-      name: String(fd.get("name")),
-      phone: String(fd.get("phone")),
-      partySize: Number(fd.get("partySize")),
-      date,
-      time,
-      sectionPreference: String(fd.get("section")),
-      note: String(fd.get("note") || ""),
-    };
-    const res = await fetch("/api/staff/action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "reservation_create", data }),
-    });
-    if (!res.ok) {
-      setError("Could not book. Please try again.");
+    if (!Number.isFinite(partySize) || partySize < 1 || partySize > 20) {
+      setError("Party size should be between 1 and 20.");
       return;
     }
-    setOk(true);
-    form.reset();
+    setBusy(true);
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reservation_create",
+          utm: readUtm(),
+          data: {
+            name,
+            phone,
+            partySize,
+            date,
+            time,
+            sectionPreference: String(fd.get("section")),
+            note: String(fd.get("note") || ""),
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Could not book. Please try again.");
+        return;
+      }
+      setOk(true);
+      form.reset();
+    } catch {
+      setError("Could not book. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -82,6 +111,7 @@ export default function ReservePage() {
               ) : (
                 <form
                   onSubmit={onSubmit}
+                  noValidate
                   style={{ display: "grid", gap: "1rem" }}
                 >
                   <div className="form-2">
@@ -115,8 +145,14 @@ export default function ReservePage() {
                     </NeoSelect>
                   </div>
                   <NeoTextarea name="note" label="Special note" rows={3} />
-                  {error && <p style={{ color: "#86302a" }}>{error}</p>}
-                  <NeoButton type="submit">Request reservation</NeoButton>
+                  {error && (
+                    <p className="form-error" role="alert">
+                      {error}
+                    </p>
+                  )}
+                  <NeoButton type="submit" disabled={busy}>
+                    {busy ? "Sending…" : "Request reservation"}
+                  </NeoButton>
                 </form>
               )}
             </div>

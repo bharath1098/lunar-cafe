@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { joinOrCreateSession } from "@/lib/store";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  if (!rateLimit(`join:${ip}`, 30, 10 * 60_000)) {
+    return NextResponse.json(
+      { error: "Too many attempts. Wait a moment and try again." },
+      { status: 429 },
+    );
+  }
   try {
     const body = await req.json();
     if (!String(body.phone || "").trim()) {

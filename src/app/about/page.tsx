@@ -38,9 +38,10 @@ import { CAFE_MEDIA, GALLERY } from "@/lib/media";
 import { SEED_MENU } from "@/lib/menu-data";
 
 export const metadata: Metadata = {
-  title: "About · Lunar Cafe",
+  title: "About Lunar Cafe Jubilee Hills",
   description:
-    "The story of Lunar Cafe, Jubilee Hills: artisanal coffee, gourmet fusion plates and a mint-and-gold garden hideaway. Open daily 11:00 AM – 11:30 PM.",
+    "The story of Lunar Cafe, Jubilee Hills: coffee, fusion plates and a garden hideaway. Open daily 11:00 AM – 11:30 PM.",
+  alternates: { canonical: "/about" },
 };
 
 const DRINK_CATEGORIES = new Set([

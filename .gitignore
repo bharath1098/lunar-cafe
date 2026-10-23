@@ -46,8 +46,10 @@ next-env.d.ts
 /data/*.json.imported
 /data/*.db
 /data/*.db-*
+/data/*.ndjson
 
 # local scratch / editor
 .shots/
 .vscode/
 /public/images/
+/public/media/uploads/

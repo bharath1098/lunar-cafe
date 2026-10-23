@@ -9,6 +9,7 @@ import QRCode from "qrcode";
 import clsx from "clsx";
 import {
   Armchair,
+  ArrowLeftRight,
   Banknote,
   Bell,
   BarChart3,
@@ -39,9 +40,17 @@ import {
   Users,
   UtensilsCrossed,
   Wallet,
+  KeyRound,
+  Download,
+  ShoppingBag,
+  Store,
 } from "lucide-react";
 import { NeoButton, NeoInput, NeoSelect, NeoTextarea } from "@/components/Neo";
+import { PasswordInput } from "@/components/PasswordInput";
+import { addMinutesToHm, type OrderingStatus } from "@/lib/ordering-hours";
 import { TakeOrderSheet } from "@/components/TakeOrderSheet";
+import { DeskOrders, deskKitchenStatus, type DeskSession } from "@/components/DeskOrders";
+import { PetpoojaGuide } from "@/components/PetpoojaGuide";
 import { billableOrders } from "@/lib/bill";
 import { CAFE_MEDIA } from "@/lib/media";
 import { formatMoney } from "@/lib/cafe";
@@ -62,6 +71,14 @@ const FORCE_CLOSE_REASONS = [
   "Complimentary / owner",
 ];
 
+const DESK_CANCEL_REASONS = [
+  "Guest cancelled on the app",
+  "Wrong items / wrong order",
+  "Item unavailable",
+  "Rider delayed or cancelled",
+  "Duplicate order",
+];
+
 const RESERVATION_STATUS_ACTIONS: { id: ReservationStatus; label: string }[] = [
   { id: "confirmed", label: "Confirmed" },
   { id: "seated", label: "Seated" },
@@ -79,6 +96,12 @@ export default function StaffDashboard() {
   const [rejectReason, setRejectReason] = useState("Item unavailable today");
   const [orderTable, setOrderTable] = useState<{ id: string; label: string } | null>(null);
   const [orderNotice, setOrderNotice] = useState("");
+  const [deskOrder, setDeskOrder] = useState<null | "swiggy" | "zomato" | "takeaway">(null);
+  const [deskBusy, setDeskBusy] = useState<string | null>(null);
+  const [deskCancel, setDeskCancel] = useState<DeskSession | null>(null);
+  const [deskCancelReason, setDeskCancelReason] = useState("");
+  const [deskCancelError, setDeskCancelError] = useState("");
+  const [deskCancelBusy, setDeskCancelBusy] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [menuQuery, setMenuQuery] = useState("");
   const [menuCategory, setMenuCategory] = useState("All");
@@ -112,11 +135,16 @@ export default function StaffDashboard() {
     price: "",
     isVeg: true,
     available: true,
+    image: "",
   });
+  const [menuCategoryMode, setMenuCategoryMode] = useState<"pick" | "new">("pick");
+  const [menuImageFile, setMenuImageFile] = useState<File | null>(null);
+  const [menuImagePreview, setMenuImagePreview] = useState("");
   const [menuNotice, setMenuNotice] = useState("");
   const [menuBusy, setMenuBusy] = useState(false);
   const [menuFormOpen, setMenuFormOpen] = useState(false);
   const menuFormRef = useRef<HTMLElement>(null);
+  const menuImageInputRef = useRef<HTMLInputElement>(null);
   const [forceClose, setForceClose] = useState<{ sessionId: string; tableLabel: string } | null>(null);
   const [forceCloseReason, setForceCloseReason] = useState("");
   const [forceCloseBusy, setForceCloseBusy] = useState(false);
@@ -147,6 +175,26 @@ export default function StaffDashboard() {
   } | null>(null);
   const [payMethod, setPayMethod] = useState<"cash" | "upi" | "card">("cash");
   const [payBusy, setPayBusy] = useState(false);
+  const [switchPick, setSwitchPick] = useState<Record<string, string>>({});
+  const [switchBusyId, setSwitchBusyId] = useState<string | null>(null);
+  const [staffSwitch, setStaffSwitch] = useState<{
+    sessionId: string;
+    fromTableId: string;
+    tableLabel: string;
+  } | null>(null);
+  const [staffSwitchTo, setStaffSwitchTo] = useState("");
+  const [staffSwitchReason, setStaffSwitchReason] = useState("");
+  const [staffSwitchBusy, setStaffSwitchBusy] = useState(false);
+  const [staffSwitchError, setStaffSwitchError] = useState("");
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [nextPassword, setNextPassword] = useState("");
+  const [passwordMsg, setPasswordMsg] = useState("");
+  const [passwordErr, setPasswordErr] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [extendUntil, setExtendUntil] = useState("");
+  const [extendBusy, setExtendBusy] = useState(false);
+  const [extendError, setExtendError] = useState("");
 
   useEffect(() => {
     const u = readStaffSession<StaffUser>();
@@ -164,8 +212,13 @@ export default function StaffDashboard() {
       cache: "no-store",
       headers: silent ? { "X-Lunar-Quiet": "1" } : undefined,
     });
+    if (res.status === 401) {
+      clearStaffSession();
+      router.replace("/staff/login");
+      return;
+    }
     if (res.ok) setDash(await res.json());
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!user) return;
@@ -176,13 +229,92 @@ export default function StaffDashboard() {
     return () => clearInterval(t);
   }, [user, load]);
 
+  const closingSoon = Boolean((dash?.ordering as OrderingStatus | undefined)?.closingSoon);
+  const effectiveEnd = (dash?.ordering as OrderingStatus | undefined)?.effectiveHoursEnd;
+  useEffect(() => {
+    if (!closingSoon || !effectiveEnd) {
+      setExtendUntil("");
+      return;
+    }
+    setExtendUntil((prev) => prev || addMinutesToHm(effectiveEnd, 30));
+  }, [closingSoon, effectiveEnd]);
+
   async function action(body: Record<string, unknown>) {
-    await fetch("/api/staff/action", {
+    const res = await fetch("/api/staff/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...body, actor: user?.email }),
     });
+    if (res.status === 401) {
+      clearStaffSession();
+      router.replace("/staff/login");
+      return;
+    }
     load();
+  }
+
+  async function deskAction(body: Record<string, unknown>, okMessage: string) {
+    const sessionId = String(body.sessionId || "");
+    setDeskBusy(sessionId || "new");
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, actor: user?.email }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        clearStaffSession();
+        router.replace("/staff/login");
+        return;
+      }
+      if (!res.ok) {
+        setOrderNotice(json.error || "Could not update that order");
+        return;
+      }
+      setOrderNotice(okMessage);
+      load();
+    } finally {
+      setDeskBusy(null);
+    }
+  }
+
+  function closeDeskCancel() {
+    if (deskCancelBusy) return;
+    setDeskCancel(null);
+    setDeskCancelReason("");
+    setDeskCancelError("");
+  }
+
+  async function confirmDeskCancel() {
+    if (!deskCancel) return;
+    const reason = deskCancelReason.trim();
+    if (reason.length < 3) {
+      setDeskCancelError("Enter a short reason before cancelling.");
+      return;
+    }
+    setDeskCancelBusy(true);
+    setDeskCancelError("");
+    try {
+      const source =
+        deskCancel.channel === "swiggy"
+          ? "Swiggy"
+          : deskCancel.channel === "zomato"
+            ? "Zomato"
+            : "Takeaway";
+      await deskAction(
+        {
+          action: "cancel_online_order",
+          sessionId: deskCancel.id,
+          reason,
+        },
+        `${source} order cancelled.`,
+      );
+      setDeskCancel(null);
+      setDeskCancelReason("");
+    } finally {
+      setDeskCancelBusy(false);
+    }
   }
 
   function cancelForceClose() {
@@ -293,7 +425,31 @@ export default function StaffDashboard() {
     if (!user) return [];
     const all = [
       { id: "overview", label: "Overview", icon: LayoutDashboard, roles: ["owner", "reception", "waiter", "kitchen"] },
-      { id: "tables", label: "Tables", icon: Armchair, roles: ["owner", "reception", "waiter"], count: dash?.billRequests?.length },
+      {
+        id: "tables",
+        label: user.role === "waiter" ? "Tables" : "Dine-in",
+        icon: Armchair,
+        roles: ["owner", "reception", "waiter"],
+        count: (dash?.billRequests?.length || 0) + (dash?.tableSwitchRequests?.length || 0),
+      },
+      {
+        id: "online",
+        label: "Online",
+        icon: Smartphone,
+        roles: ["owner", "reception"],
+        count: (dash?.activeSessions || []).filter(
+          (s: { channel?: string }) => s.channel === "swiggy" || s.channel === "zomato",
+        ).length,
+      },
+      {
+        id: "takeaway",
+        label: "Takeaway",
+        icon: ShoppingBag,
+        roles: ["owner", "reception"],
+        count: (dash?.activeSessions || []).filter(
+          (s: { channel?: string }) => s.channel === "takeaway",
+        ).length,
+      },
       { id: "approvals", label: "Approvals", icon: CheckCheck, roles: ["owner", "reception", "waiter"], count: dash?.pendingApprovals?.length },
       { id: "kitchen", label: "Kitchen", icon: ChefHat, roles: ["owner", "kitchen", "reception"] },
       {
@@ -303,7 +459,15 @@ export default function StaffDashboard() {
         roles: ["owner", "reception", "waiter"],
         count:
           (dash?.billRequests?.length || 0) +
+          (dash?.tableSwitchRequests?.length || 0) +
           (user.role === "waiter" ? 0 : dash?.paymentApprovals?.length || 0),
+      },
+      {
+        id: "unsettled",
+        label: "Unsettled bills",
+        icon: Receipt,
+        roles: ["owner", "reception"],
+        count: dash?.unsettledBills?.length || 0,
       },
       { id: "menu", label: "Menu", icon: UtensilsCrossed, roles: ["owner"] },
       { id: "team", label: "Team", icon: UserPlus, roles: ["owner"] },
@@ -628,7 +792,12 @@ export default function StaffDashboard() {
       price: "",
       isVeg: true,
       available: true,
+      image: "",
     });
+    setMenuCategoryMode("pick");
+    setMenuImageFile(null);
+    setMenuImagePreview("");
+    if (menuImageInputRef.current) menuImageInputRef.current.value = "";
   }
 
   function openMenuForm() {
@@ -639,15 +808,25 @@ export default function StaffDashboard() {
   }
 
   function beginAddMenu() {
+    const known = Array.from(
+      new Set((dash?.menu || []).map((m: { category?: string }) => String(m.category || "").trim()).filter(Boolean)),
+    ) as string[];
+    const preset =
+      menuCategory !== "All" && known.includes(menuCategory) ? menuCategory : known[0] || "";
     setMenuForm({
       id: "",
       name: "",
-      category: "",
+      category: preset,
       description: "",
       price: "",
       isVeg: true,
       available: true,
+      image: "",
     });
+    setMenuCategoryMode(known.length ? "pick" : "new");
+    setMenuImageFile(null);
+    setMenuImagePreview("");
+    if (menuImageInputRef.current) menuImageInputRef.current.value = "";
     setMenuNotice("");
     openMenuForm();
   }
@@ -657,17 +836,49 @@ export default function StaffDashboard() {
       resetMenuForm();
       return;
     }
+    const known = Array.from(
+      new Set((dash?.menu || []).map((x: { category?: string }) => String(x.category || "").trim()).filter(Boolean)),
+    ) as string[];
+    const category = m.category || "";
     setMenuForm({
       id: m.id,
       name: m.name || "",
-      category: m.category || "",
+      category,
       description: m.description || "",
       price: String(m.price ?? ""),
       isVeg: Boolean(m.isVeg),
       available: Boolean(m.available),
+      image: m.image || "",
     });
+    setMenuCategoryMode(known.includes(category) ? "pick" : "new");
+    setMenuImageFile(null);
+    setMenuImagePreview(m.image || "");
+    if (menuImageInputRef.current) menuImageInputRef.current.value = "";
     setMenuNotice("");
     openMenuForm();
+  }
+
+  function onMenuImagePick(file: File | null) {
+    setMenuImageFile(file);
+    if (!file) {
+      setMenuImagePreview(menuForm.image || "");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setMenuNotice("Use a JPG, PNG, or WebP photo");
+      setMenuImageFile(null);
+      if (menuImageInputRef.current) menuImageInputRef.current.value = "";
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setMenuNotice("Photo must be under 2 MB");
+      setMenuImageFile(null);
+      if (menuImageInputRef.current) menuImageInputRef.current.value = "";
+      return;
+    }
+    setMenuNotice("");
+    const url = URL.createObjectURL(file);
+    setMenuImagePreview(url);
   }
 
   async function saveMenuItem() {
@@ -681,6 +892,18 @@ export default function StaffDashboard() {
         setMenuNotice("Name, category, and a valid price are required");
         return;
       }
+      let image = menuForm.image.trim();
+      if (menuImageFile) {
+        const body = new FormData();
+        body.append("file", menuImageFile);
+        const upload = await fetch("/api/staff/menu-image", { method: "POST", body });
+        const uploaded = await upload.json();
+        if (!upload.ok) {
+          setMenuNotice(uploaded.error || "Could not upload the photo");
+          return;
+        }
+        image = String(uploaded.url || "");
+      }
       const existing = menuForm.id
         ? dash.menu.find((m: any) => m.id === menuForm.id)
         : null;
@@ -693,6 +916,7 @@ export default function StaffDashboard() {
         price,
         isVeg: menuForm.isVeg,
         available: menuForm.available,
+        image: image || undefined,
       };
       const res = await fetch("/api/staff/action", {
         method: "POST",
@@ -729,20 +953,13 @@ export default function StaffDashboard() {
     setMenuNotice(`${name} deleted.`);
     load();
   }
-  const title = tabs.find((t) => t.id === tab)?.label || "Overview";
+  const title =
+    tab === "petpooja"
+      ? "Petpooja"
+      : tabs.find((t) => t.id === tab)?.label || "Overview";
   const canTakeOrder =
     user.role === "waiter" || user.role === "reception" || user.role === "owner";
-  const ordering = dash?.ordering as
-    | {
-        acceptingOrders: boolean;
-        withinHours: boolean;
-        ordersOpen: boolean;
-        allowAfterHours: boolean;
-        hoursLabel: string;
-        localTimeLabel: string;
-        reason?: string;
-      }
-    | undefined;
+  const ordering = dash?.ordering as OrderingStatus | undefined;
   const cafeAcceptingOrders = ordering ? ordering.acceptingOrders : true;
   const billRequests: {
     sessionId: string;
@@ -752,15 +969,183 @@ export default function StaffDashboard() {
     assignedWaiterId: string | null;
     total: number;
   }[] = canTakeOrder ? dash.billRequests || [] : [];
+  const tableSwitchRequests: {
+    sessionId: string;
+    tableId: string;
+    guestName: string;
+    reason: string;
+    requestedAt: string;
+    assignedWaiterId: string | null;
+  }[] = canTakeOrder ? dash.tableSwitchRequests || [] : [];
+  const freeTables: { id: string; label: string }[] = dash.freeTables || [];
   const canSettleBill = user.role === "owner" || user.role === "reception";
   const canGenerateBill =
     user.role === "waiter" || user.role === "reception" || user.role === "owner";
   const canMarkPaid =
     user.role === "waiter" || user.role === "reception" || user.role === "owner";
   const canControlOrdering = user.role === "owner" || user.role === "reception";
+  const canSwitchTable =
+    user.role === "waiter" || user.role === "reception" || user.role === "owner";
+
+  async function approveGuestSwitch(sessionId: string) {
+    if (!user) return;
+    const toTableId = switchPick[sessionId] || freeTables[0]?.id;
+    if (!toTableId) {
+      setOrderNotice("No free tables available to switch to.");
+      return;
+    }
+    setSwitchBusyId(sessionId);
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "approve_table_switch",
+          sessionId,
+          toTableId,
+          actor: user.email,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setOrderNotice(json.error || "Could not switch the table.");
+        return;
+      }
+      setOrderNotice(
+        `Moved session to table ${String(toTableId).replace("lunar-", "").toUpperCase()}.`,
+      );
+      setSwitchPick((prev) => {
+        const next = { ...prev };
+        delete next[sessionId];
+        return next;
+      });
+      load();
+    } finally {
+      setSwitchBusyId(null);
+    }
+  }
+
+  async function rejectGuestSwitch(sessionId: string) {
+    if (!user) return;
+    setSwitchBusyId(sessionId);
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reject_table_switch",
+          sessionId,
+          actor: user.email,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setOrderNotice(json.error || "Could not reject the switch request.");
+        return;
+      }
+      setOrderNotice("Table switch request declined.");
+      load();
+    } finally {
+      setSwitchBusyId(null);
+    }
+  }
+
+  function openStaffSwitch(session: { id: string; tableId: string }) {
+    setStaffSwitch({
+      sessionId: session.id,
+      fromTableId: session.tableId,
+      tableLabel: session.tableId.replace("lunar-", "").toUpperCase(),
+    });
+    setStaffSwitchTo(freeTables[0]?.id || "");
+    setStaffSwitchReason("");
+    setStaffSwitchError("");
+  }
+
+  function cancelStaffSwitch() {
+    if (staffSwitchBusy) return;
+    setStaffSwitch(null);
+    setStaffSwitchTo("");
+    setStaffSwitchReason("");
+    setStaffSwitchError("");
+  }
+
+  async function confirmStaffSwitch() {
+    if (!staffSwitch || !user) return;
+    if (!staffSwitchTo) {
+      setStaffSwitchError("Pick a free table.");
+      return;
+    }
+    if (staffSwitchReason.trim().length < 3) {
+      setStaffSwitchError("Enter a short reason for the switch.");
+      return;
+    }
+    setStaffSwitchBusy(true);
+    setStaffSwitchError("");
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "staff_table_switch",
+          sessionId: staffSwitch.sessionId,
+          toTableId: staffSwitchTo,
+          reason: staffSwitchReason.trim(),
+          actor: user.email,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setStaffSwitchError(json.error || "Could not switch the table.");
+        return;
+      }
+      setOrderNotice(
+        `Switched ${staffSwitch.tableLabel} → ${staffSwitchTo.replace("lunar-", "").toUpperCase()}.`,
+      );
+      setStaffSwitch(null);
+      setStaffSwitchTo("");
+      setStaffSwitchReason("");
+      load();
+    } finally {
+      setStaffSwitchBusy(false);
+    }
+  }
 
   async function setOrdering(patch: Record<string, unknown>) {
     await action({ action: "set_ordering", ...patch });
+  }
+
+  async function extendHours() {
+    setExtendError("");
+    if (!extendUntil) {
+      setExtendError("Enter a close time");
+      return;
+    }
+    setExtendBusy(true);
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "extend_hours",
+          hoursEnd: extendUntil,
+          actor: user?.email,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setExtendError(json.error || "Could not extend cafe hours");
+        return;
+      }
+      setExtendUntil("");
+      setOrderNotice(
+        json.ordering?.hoursLabel
+          ? `Tonight's hours are now ${json.ordering.hoursLabel}.`
+          : "Cafe hours extended for tonight.",
+      );
+      load();
+    } finally {
+      setExtendBusy(false);
+    }
   }
 
   function requestCloseCafe() {
@@ -835,15 +1220,24 @@ export default function StaffDashboard() {
   }
 
   const activeSessions = dash.activeSessions || [];
+  const floorSessions = activeSessions.filter(
+    (s: { channel?: string }) => !s.channel || s.channel === "dine_in",
+  );
+  const onlineSessions = activeSessions.filter(
+    (s: { channel?: string }) => s.channel === "swiggy" || s.channel === "zomato",
+  );
+  const takeawaySessions = activeSessions.filter(
+    (s: { channel?: string }) => s.channel === "takeaway",
+  );
   const closeCafePending = {
-    openTables: activeSessions.length,
-    billsNotGenerated: activeSessions.filter((s: any) => !s.billGeneratedAt).length,
-    unpaidBills: activeSessions.filter((s: any) => s.billGeneratedAt && !s.paidAt).length,
-    paymentApprovals: activeSessions.filter((s: any) => s.paymentAwaitingApproval).length,
-    initiatedBills: activeSessions.filter(
+    openTables: floorSessions.length,
+    billsNotGenerated: floorSessions.filter((s: any) => !s.billGeneratedAt).length,
+    unpaidBills: floorSessions.filter((s: any) => s.billGeneratedAt && !s.paidAt).length,
+    paymentApprovals: floorSessions.filter((s: any) => s.paymentAwaitingApproval).length,
+    initiatedBills: floorSessions.filter(
       (s: any) => s.billRequestedAt && !s.billGeneratedAt,
     ).length,
-    tables: activeSessions.map((s: any) => ({
+    tables: floorSessions.map((s: any) => ({
       label: String(s.tableId || "").replace("lunar-", ""),
       status: s.paidAt
         ? "Paid"
@@ -887,9 +1281,65 @@ export default function StaffDashboard() {
     0,
   );
 
-  function signOut() {
+  async function signOut() {
+    await fetch("/api/staff/logout", { method: "POST" }).catch(() => {});
     clearStaffSession();
     router.push("/staff/login");
+  }
+
+  async function savePassword() {
+    setPasswordBusy(true);
+    setPasswordErr("");
+    setPasswordMsg("");
+    try {
+      const res = await fetch("/api/staff/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "staff_change_password",
+          currentPassword,
+          password: nextPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        clearStaffSession();
+        router.replace("/staff/login");
+        return;
+      }
+      if (!res.ok) {
+        setPasswordErr(data.error || "Could not update password");
+        return;
+      }
+      setCurrentPassword("");
+      setNextPassword("");
+      setPasswordMsg("Password updated.");
+    } catch {
+      setPasswordErr("Could not update password");
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
+  async function downloadBackup() {
+    const res = await fetch("/api/staff/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "export_backup" }),
+    });
+    if (res.status === 401) {
+      clearStaffSession();
+      router.replace("/staff/login");
+      return;
+    }
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `lunar-cafe-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -924,6 +1374,13 @@ export default function StaffDashboard() {
           <Link href="/" aria-label="Public site">
             <Globe size={18} />
           </Link>
+          <button
+            type="button"
+            onClick={() => setAccountOpen(true)}
+            aria-label="Account and password"
+          >
+            <KeyRound size={18} />
+          </button>
           <button type="button" onClick={signOut} aria-label="Sign out">
             <LogOut size={18} />
           </button>
@@ -1023,29 +1480,72 @@ export default function StaffDashboard() {
             <small>STAFF</small>
           </span>
         </div>
-        {tabs.map((t) => {
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={clsx("staff-nav-btn", tab === t.id && "on")}
-            >
-              <Icon size={18} />
-              {t.label}
-              {!!(t as any).count && <span className="staff-nav-count">{(t as any).count}</span>}
-            </button>
-          );
-        })}
-        <div className="staff-foot" style={{ marginTop: "auto", display: "grid", gap: 8 }}>
-          <div style={{ padding: "0.6rem 0.8rem", borderRadius: 14, background: "rgba(255,255,255,0.06)", fontSize: "0.82rem" }}>
+        <nav className="staff-nav" aria-label="Staff">
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={clsx("staff-nav-btn", tab === t.id && "on")}
+              >
+                <Icon size={18} />
+                {t.label}
+                {!!(t as any).count && <span className="staff-nav-count">{(t as any).count}</span>}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="staff-foot">
+          <div className="staff-foot-user">
             <strong>{user.name}</strong>
-            <div style={{ opacity: 0.6, textTransform: "capitalize" }}>{user.role}</div>
+            <span>{user.role}</span>
           </div>
-          <Link href="/" className="staff-nav-btn">Public site</Link>
-          <button className="staff-nav-btn" onClick={signOut}>
-            <LogOut size={18} /> Sign out
-          </button>
+          <div className="staff-foot-actions" role="group" aria-label="Account actions">
+            <Link href="/" className="staff-foot-icon" title="Public site" aria-label="Public site">
+              <Globe size={18} />
+            </Link>
+            <button
+              type="button"
+              className="staff-foot-icon"
+              title="Password"
+              aria-label="Password"
+              onClick={() => setAccountOpen(true)}
+            >
+              <KeyRound size={18} />
+            </button>
+            {user.role === "owner" && (
+              <button
+                type="button"
+                className={clsx("staff-foot-icon", tab === "petpooja" && "on")}
+                title="Petpooja"
+                aria-label="Petpooja"
+                onClick={() => setTab("petpooja")}
+              >
+                <Store size={18} />
+              </button>
+            )}
+            {user.role === "owner" && (
+              <button
+                type="button"
+                className="staff-foot-icon"
+                title="Backup"
+                aria-label="Backup"
+                onClick={() => void downloadBackup()}
+              >
+                <Download size={18} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="staff-foot-icon"
+              title="Sign out"
+              aria-label="Sign out"
+              onClick={signOut}
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -1115,6 +1615,7 @@ export default function StaffDashboard() {
           <div
             className={clsx(
               "cafe-order-status",
+              ordering.closingSoon && "is-closing",
               ordering.acceptingOrders ? "is-open" : "is-closed",
             )}
           >
@@ -1125,10 +1626,24 @@ export default function StaffDashboard() {
                   {ordering.acceptingOrders ? "Accepting orders" : "Not accepting orders"}
                 </strong>
                 <span>
-                  Hours {ordering.hoursLabel} · now {ordering.localTimeLabel}
+                  Hours {ordering.hoursLabel}
+                  {ordering.hoursExtended ? " · extended tonight" : ""}
+                  {" · now "}
+                  {ordering.localTimeLabel}
                   {!ordering.withinHours ? " · outside hours" : ""}
                   {ordering.allowAfterHours ? " · after-hours allowed" : ""}
                 </span>
+                {ordering.closingSoon && ordering.minutesUntilClose != null && (
+                  <strong className="cafe-close-countdown">
+                    Cafe closes in {ordering.minutesUntilClose} min
+                  </strong>
+                )}
+                {ordering.inGrace && !ordering.allowAfterHours && ordering.graceMinutesLeft != null && (
+                  <strong className="cafe-close-countdown">
+                    Cafe is closed. Close every open table in {ordering.graceMinutesLeft} min
+                    or they close automatically.
+                  </strong>
+                )}
               </div>
             </div>
             {canControlOrdering && (
@@ -1153,12 +1668,112 @@ export default function StaffDashboard() {
                 >
                   {ordering.allowAfterHours ? "Lock to hours" : "Allow after hours"}
                 </NeoButton>
+                {(dash.unsettledBills?.length || 0) > 0 && (
+                  <NeoButton className="btn-sm" variant="ghost" onClick={() => setTab("unsettled")}>
+                    Unsettled bills ({dash.unsettledBills?.length || 0})
+                  </NeoButton>
+                )}
               </div>
+            )}
+            {canControlOrdering && ordering.closingSoon && (
+              <form
+                className="cafe-extend"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void extendHours();
+                }}
+              >
+                <label className="neo-field">
+                  <span>Stay open until</span>
+                  <input
+                    className="neo-input"
+                    type="time"
+                    value={extendUntil}
+                    onChange={(e) => setExtendUntil(e.target.value)}
+                    required
+                  />
+                </label>
+                <NeoButton type="submit" className="btn-sm" disabled={extendBusy}>
+                  {extendBusy ? "Saving…" : "Extend cafe hours"}
+                </NeoButton>
+                <p className="cafe-extend-note">
+                  Tonight only. The 30-minute warning shows again before the new close time.
+                </p>
+                {extendError && <p className="cafe-extend-error">{extendError}</p>}
+              </form>
             )}
           </div>
         )}
 
         {orderNotice && <p className="order-notice">{orderNotice}</p>}
+
+        {tableSwitchRequests.length > 0 && (
+          <section className="bill-request-board" aria-label="Guests requesting a table switch">
+            {tableSwitchRequests.map((request) => {
+              const waiter = waiters.find((w: StaffUser) => w.id === request.assignedWaiterId);
+              const tableLabel = request.tableId.replace("lunar-", "");
+              const pick = switchPick[request.sessionId] || freeTables[0]?.id || "";
+              return (
+                <article key={request.sessionId} className="bill-request-card table-switch-card">
+                  <div>
+                    <strong>
+                      <ArrowLeftRight size={16} /> {tableLabel} · Switch table
+                      {request.guestName ? ` · ${request.guestName}` : ""}
+                    </strong>
+                    <p>
+                      {request.reason || "No reason given"} · {waitLabel(request.requestedAt)}
+                      {waiter ? ` · Assigned to ${waiter.name}` : ""}
+                    </p>
+                  </div>
+                  {canSwitchTable ? (
+                    <div className="table-switch-actions">
+                      <label className="neo-field table-switch-pick">
+                        <span>Move to</span>
+                        <select
+                          className="neo-input"
+                          value={pick}
+                          onChange={(e) =>
+                            setSwitchPick((prev) => ({
+                              ...prev,
+                              [request.sessionId]: e.target.value,
+                            }))
+                          }
+                          disabled={switchBusyId === request.sessionId || freeTables.length === 0}
+                        >
+                          {freeTables.length === 0 && <option value="">No free tables</option>}
+                          {freeTables.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <NeoButton
+                        className="btn-sm"
+                        disabled={
+                          switchBusyId === request.sessionId || !pick || freeTables.length === 0
+                        }
+                        onClick={() => void approveGuestSwitch(request.sessionId)}
+                      >
+                        {switchBusyId === request.sessionId ? "Moving…" : "Approve"}
+                      </NeoButton>
+                      <NeoButton
+                        variant="ghost"
+                        className="btn-sm"
+                        disabled={switchBusyId === request.sessionId}
+                        onClick={() => void rejectGuestSwitch(request.sessionId)}
+                      >
+                        Reject
+                      </NeoButton>
+                    </div>
+                  ) : (
+                    <span className="neo-badge neo-badge-gold">Switch requested</span>
+                  )}
+                </article>
+              );
+            })}
+          </section>
+        )}
 
         {billRequests.length > 0 && (
           <section className="bill-request-board" aria-label="Guests requesting the bill">
@@ -1230,14 +1845,14 @@ export default function StaffDashboard() {
           <>
             <div className="kpi-grid">
               <Kpi label="Open tables" value={dash.stats.openTables} icon={<Armchair size={18} />} />
-              <Kpi label="Pending approvals" value={dash.stats.pendingApprovals} icon={<CheckCheck size={18} />} hot={dash.stats.pendingApprovals > 0} />
+              <Kpi label="Online open" value={dash.stats.openOnline || 0} icon={<Smartphone size={18} />} />
+              <Kpi label="Takeaway open" value={dash.stats.openTakeaway || 0} icon={<ShoppingBag size={18} />} />
               <Kpi label="In kitchen" value={dash.kitchenItems.length} icon={<Flame size={18} />} />
-              <Kpi label="Paid bills" value={dash.stats.paidBills} icon={<Wallet size={18} />} />
             </div>
             <h2 className="h-display h-md" style={{ margin: "2rem 0 1rem" }}>Tables right now</h2>
             <div className="table-map">
               {dash.tables.map((t: any) => {
-                const s = dash.activeSessions.find((x: any) => x.tableId === t.id);
+                const s = floorSessions.find((x: any) => x.tableId === t.id);
                 return (
                   <div
                     key={t.id}
@@ -1263,6 +1878,17 @@ export default function StaffDashboard() {
                         Initiated bill
                       </span>
                     )}
+                    {canTakeOrder && s?.tableSwitchRequestedAt && (
+                      <span className="neo-badge neo-badge-gold">Switch requested</span>
+                    )}
+                    {s?.tableSwitches?.length > 0 && (
+                      <span className="muted" style={{ fontSize: "0.72rem" }}>
+                        Switched from{" "}
+                        {s.tableSwitches[s.tableSwitches.length - 1].fromTableId
+                          .replace("lunar-", "")
+                          .toUpperCase()}
+                      </span>
+                    )}
                     <div className="table-tile-cta-row">
                       {canTakeOrder && cafeAcceptingOrders && !s?.billGeneratedAt && (
                         <NeoButton className="btn-sm" onClick={() => openOrder(t.id)} aria-label="Take order">
@@ -1283,6 +1909,20 @@ export default function StaffDashboard() {
                             <Receipt size={15} />
                           </span>
                           Bill
+                        </NeoButton>
+                      )}
+                      {s && canSwitchTable && !s.billGeneratedAt && (
+                        <NeoButton
+                          className="btn-sm"
+                          variant="ghost"
+                          onClick={() => openStaffSwitch(s)}
+                          aria-label="Switch table"
+                          disabled={freeTables.length === 0}
+                        >
+                          <span className="table-tile-cta-ico" aria-hidden>
+                            <ArrowLeftRight size={15} />
+                          </span>
+                          Switch
                         </NeoButton>
                       )}
                       {s?.billGeneratedAt && !s.paidAt && (
@@ -1379,7 +2019,7 @@ export default function StaffDashboard() {
             )}
           <div className="table-map">
             {dash.tables.map((t: any) => {
-              const session = dash.activeSessions.find((s: any) => s.tableId === t.id);
+              const session = floorSessions.find((s: any) => s.tableId === t.id);
               const waiter = waiters.find((w: StaffUser) => w.id === t.assignedWaiterId);
               return (
                 <div
@@ -1466,6 +2106,20 @@ export default function StaffDashboard() {
                           Bill
                         </NeoButton>
                       )}
+                      {session && canSwitchTable && !session.billGeneratedAt && (
+                        <NeoButton
+                          className="btn-sm"
+                          variant="ghost"
+                          onClick={() => openStaffSwitch(session)}
+                          aria-label="Switch table"
+                          disabled={freeTables.length === 0}
+                        >
+                          <span className="table-tile-cta-ico" aria-hidden>
+                            <ArrowLeftRight size={15} />
+                          </span>
+                          Switch
+                        </NeoButton>
+                      )}
                       {session?.billGeneratedAt && !session.paidAt && (
                         <>
                           <Link
@@ -1493,6 +2147,18 @@ export default function StaffDashboard() {
                         </>
                       )}
                     </div>
+                    {session?.tableSwitchRequestedAt && (
+                      <span className="neo-badge neo-badge-gold">Switch requested</span>
+                    )}
+                    {session?.tableSwitches?.length > 0 && (
+                      <span className="muted" style={{ fontSize: "0.75rem" }}>
+                        Switched from{" "}
+                        {session.tableSwitches[session.tableSwitches.length - 1].fromTableId
+                          .replace("lunar-", "")
+                          .toUpperCase()}{" "}
+                        → {session.tableId.replace("lunar-", "").toUpperCase()}
+                      </span>
+                    )}
                     {canTakeOrder && !cafeAcceptingOrders && !session?.billGeneratedAt && (
                       <span className="muted" style={{ fontSize: "0.78rem" }}>
                         Ordering closed
@@ -1552,7 +2218,15 @@ export default function StaffDashboard() {
               {dash.pendingApprovals.map((o: any) => (
                 <div key={o.id} className="ticket">
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <strong>{o.tableId.replace("lunar-", "")} · Token #{o.tokenNumber}</strong>
+                    <strong>
+                      {(o.tableId || o.sessionTableId || "").replace("lunar-", "")}
+                      {o.sessionTableId &&
+                      o.tableId &&
+                      o.sessionTableId !== o.tableId
+                        ? ` → ${o.sessionTableId.replace("lunar-", "")}`
+                        : ""}{" "}
+                      · Token #{o.tokenNumber}
+                    </strong>
                     <span className="neo-badge neo-badge-gold">Needs approval</span>
                   </div>
                   <p style={{ margin: "0.4rem 0" }}>
@@ -1578,6 +2252,61 @@ export default function StaffDashboard() {
           </>
         )}
 
+        {tab === "online" && (
+          <DeskOrders
+            kind="online"
+            sessions={onlineSessions}
+            accepting={cafeAcceptingOrders}
+            busyId={deskBusy}
+            onNew={setDeskOrder}
+            onHandover={(sessionId) =>
+              deskAction({ action: "hand_over_online", sessionId }, "Order handed over.")
+            }
+            onCancel={(session) => {
+              setDeskCancel(session);
+              setDeskCancelReason("");
+              setDeskCancelError("");
+            }}
+            onBill={() => undefined}
+            onPay={() => undefined}
+          />
+        )}
+
+        {tab === "takeaway" && (
+          <DeskOrders
+            kind="takeaway"
+            sessions={takeawaySessions}
+            accepting={cafeAcceptingOrders}
+            busyId={deskBusy}
+            onNew={setDeskOrder}
+            onHandover={() => undefined}
+            onCancel={(session) => {
+              setDeskCancel(session);
+              setDeskCancelReason("");
+              setDeskCancelError("");
+            }}
+            onBill={(session) =>
+              requestGenerateBill({
+                id: session.id,
+                tableId: "takeaway",
+                billGeneratedAt: session.billGeneratedAt,
+                bill: session.bill,
+              })
+            }
+            onPay={(session) => {
+              setPayMethod("cash");
+              setPayBill({
+                sessionId: session.id,
+                tableLabel: "Takeaway",
+                total: session.bill?.grandTotal || 0,
+                billNumber: session.billNumber,
+              });
+            }}
+          />
+        )}
+
+        {tab === "petpooja" && user.role === "owner" && <PetpoojaGuide />}
+
         {tab === "kitchen" && (
           <div className="kitchen-board">
             {[
@@ -1599,7 +2328,22 @@ export default function StaffDashboard() {
                     {items.map((o: any) => (
                       <article key={o.id} className={clsx("kitchen-ticket", col.key)}>
                         <div className="kitchen-ticket-meta">
-                          <span className="kitchen-ticket-table">{o.tableId.replace("lunar-", "")}</span>
+                          <span className="kitchen-ticket-table">
+                            {o.channel === "swiggy"
+                              ? "Swiggy"
+                              : o.channel === "zomato"
+                                ? "Zomato"
+                                : o.channel === "takeaway"
+                                  ? "Takeaway"
+                                  : (o.tableId || o.sessionTableId || "").replace("lunar-", "")}
+                            {o.channel === "dine_in" || !o.channel
+                              ? o.sessionTableId &&
+                                o.tableId &&
+                                o.sessionTableId !== o.tableId
+                                ? ` → ${String(o.sessionTableId).replace("lunar-", "")}`
+                                : ""
+                              : ""}
+                          </span>
                           <span className="kitchen-ticket-token">#{o.tokenNumber}</span>
                         </div>
                         <p className="kitchen-ticket-item">
@@ -1607,6 +2351,12 @@ export default function StaffDashboard() {
                           {o.name}
                           {o.variantLabel ? ` · ${o.variantLabel}` : ""}
                         </p>
+                        {(o.channel === "swiggy" || o.channel === "zomato" || o.channel === "takeaway") && (
+                          <p className="kitchen-ticket-waiter">
+                            {o.guestName || "Guest"}
+                            {o.externalOrderId ? ` · ${o.externalOrderId}` : ""}
+                          </p>
+                        )}
                         {o.notes && <p className="kitchen-ticket-note">“{o.notes}”</p>}
                         {o.takenByStaffName && (
                           <p className="kitchen-ticket-waiter">
@@ -1643,9 +2393,9 @@ export default function StaffDashboard() {
           </div>
         )}
 
-        {tab === "bills" && (
+        {(tab === "bills" || tab === "unsettled") && (
           <div className="bill-board">
-            {dash.activeSessions.map((s: any) => {
+            {(tab === "unsettled" ? dash.unsettledBills || [] : floorSessions).map((s: any) => {
               const tableLabel = s.tableId.replace("lunar-", "");
               const guests = s.members?.length || 0;
               const items = s.bill.totalQty || 0;
@@ -1672,6 +2422,17 @@ export default function StaffDashboard() {
                         {s.billRequestedAt && !s.billGeneratedAt && (
                           <span className="neo-badge neo-badge-rose">
                             Initiated bill
+                          </span>
+                        )}
+                        {s.tableSwitchRequestedAt && (
+                          <span className="neo-badge neo-badge-gold">Switch requested</span>
+                        )}
+                        {s.tableSwitches?.length > 0 && (
+                          <span className="neo-badge neo-badge-mint">
+                            Switched from{" "}
+                            {s.tableSwitches[s.tableSwitches.length - 1].fromTableId
+                              .replace("lunar-", "")
+                              .toUpperCase()}
                           </span>
                         )}
                       </div>
@@ -1706,6 +2467,14 @@ export default function StaffDashboard() {
                         <span className="bill-items-name">
                           {line.name}
                           {line.variantLabel ? ` · ${line.variantLabel}` : ""}
+                          {(line.tableId || s.tableId) && (
+                            <small className="bill-items-note">
+                              Table {(line.tableId || s.tableId).replace("lunar-", "").toUpperCase()}
+                              {line.tableId && line.tableId !== s.tableId
+                                ? ` · now ${s.tableId.replace("lunar-", "").toUpperCase()}`
+                                : ""}
+                            </small>
+                          )}
                           {line.notes ? (
                             <small className="bill-items-note">{line.notes}</small>
                           ) : null}
@@ -1879,7 +2648,7 @@ export default function StaffDashboard() {
                           <Printer size={15} /> Print bill
                         </Link>
                       )}
-                      {canSettleBill && (
+                      {canSettleBill && tab === "bills" && (
                         <NeoButton
                           variant="danger"
                           className="btn-sm"
@@ -1897,7 +2666,9 @@ export default function StaffDashboard() {
                 </article>
               );
             })}
-            {dash.activeSessions.length === 0 && <Empty text="No open bills." />}
+            {(tab === "unsettled" ? dash.unsettledBills || [] : floorSessions).length === 0 && (
+              <Empty text={tab === "unsettled" ? "No bills waiting after automatic close." : "No open bills."} />
+            )}
           </div>
         )}
 
@@ -1947,12 +2718,48 @@ export default function StaffDashboard() {
                     value={menuForm.name}
                     onChange={(e) => setMenuForm((f) => ({ ...f, name: e.target.value }))}
                   />
-                  <NeoInput
+                  <NeoSelect
                     label="Category"
-                    value={menuForm.category}
-                    onChange={(e) => setMenuForm((f) => ({ ...f, category: e.target.value }))}
-                    placeholder="Soups"
-                  />
+                    value={menuCategoryMode === "new" ? "__new__" : menuForm.category || ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "__new__") {
+                        setMenuCategoryMode("new");
+                        setMenuForm((f) => ({ ...f, category: "" }));
+                        return;
+                      }
+                      setMenuCategoryMode("pick");
+                      setMenuForm((f) => ({ ...f, category: value }));
+                    }}
+                  >
+                    <option value="" disabled>
+                      Choose category
+                    </option>
+                    {!categories
+                      .filter((c) => c !== "All")
+                      .includes(menuForm.category) &&
+                      menuCategoryMode === "pick" &&
+                      menuForm.category && (
+                        <option value={menuForm.category}>{menuForm.category}</option>
+                      )}
+                    {categories
+                      .filter((c) => c !== "All")
+                      .map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    <option value="__new__">Add new category…</option>
+                  </NeoSelect>
+                  {menuCategoryMode === "new" && (
+                    <NeoInput
+                      label="New category"
+                      value={menuForm.category}
+                      onChange={(e) => setMenuForm((f) => ({ ...f, category: e.target.value }))}
+                      placeholder="e.g. Soups"
+                      autoFocus
+                    />
+                  )}
                   <NeoInput
                     label="Price ₹"
                     type="number"
@@ -1987,6 +2794,54 @@ export default function StaffDashboard() {
                     <option value="on">On menu</option>
                     <option value="off">Off menu</option>
                   </NeoSelect>
+                </div>
+                <div className="menu-image-field">
+                  <span className="menu-image-label">Dish photo</span>
+                  <div className="menu-image-row">
+                    <div className="menu-image-preview">
+                      {menuImagePreview ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={menuImagePreview} alt="" />
+                      ) : (
+                        <span className="muted">No photo yet</span>
+                      )}
+                    </div>
+                    <div className="menu-image-actions">
+                      <input
+                        ref={menuImageInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="menu-image-input"
+                        onChange={(e) => onMenuImagePick(e.target.files?.[0] || null)}
+                      />
+                      <NeoButton
+                        type="button"
+                        variant="ghost"
+                        className="btn-sm"
+                        onClick={() => menuImageInputRef.current?.click()}
+                      >
+                        {menuImagePreview ? "Change photo" : "Add photo"}
+                      </NeoButton>
+                      {menuImagePreview && (
+                        <NeoButton
+                          type="button"
+                          variant="ghost"
+                          className="btn-sm"
+                          onClick={() => {
+                            setMenuImageFile(null);
+                            setMenuImagePreview("");
+                            setMenuForm((f) => ({ ...f, image: "" }));
+                            if (menuImageInputRef.current) menuImageInputRef.current.value = "";
+                          }}
+                        >
+                          Remove
+                        </NeoButton>
+                      )}
+                      <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+                        JPG, PNG, or WebP · under 2 MB
+                      </p>
+                    </div>
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <NeoButton disabled={menuBusy} onClick={saveMenuItem}>
@@ -2263,9 +3118,8 @@ export default function StaffDashboard() {
                   onChange={(e) => setStaffForm((f) => ({ ...f, email: e.target.value }))}
                   placeholder="name@lunar.cafe"
                 />
-                <NeoInput
+                <PasswordInput
                   label={editingStaffId ? "New password (optional)" : "Password"}
-                  type="password"
                   value={staffForm.password}
                   onChange={(e) => setStaffForm((f) => ({ ...f, password: e.target.value }))}
                   placeholder={editingStaffId ? "Leave blank to keep" : "At least 6 characters"}
@@ -2585,6 +3439,152 @@ export default function StaffDashboard() {
           </div>
         </div>
       )}
+      {staffSwitch && (
+        <div className="staff-confirm-backdrop" onClick={cancelStaffSwitch} role="presentation">
+          <div
+            className="staff-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="staff-switch-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="staff-switch-title">Switch table?</h2>
+            <p>
+              Move the open session from <strong>{staffSwitch.tableLabel}</strong> to another free
+              table. Past orders stay on one bill and keep their original table label.
+            </p>
+            <NeoSelect
+              label="New table"
+              value={staffSwitchTo}
+              onChange={(e) => setStaffSwitchTo(e.target.value)}
+            >
+              {freeTables.length === 0 && <option value="">No free tables</option>}
+              {freeTables.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </NeoSelect>
+            <NeoTextarea
+              label="Reason"
+              rows={3}
+              required
+              autoFocus
+              placeholder="Why are you moving this party?"
+              value={staffSwitchReason}
+              onChange={(e) => {
+                setStaffSwitchReason(e.target.value);
+                if (staffSwitchError) setStaffSwitchError("");
+              }}
+            />
+            {staffSwitchError && <p className="staff-confirm-error">{staffSwitchError}</p>}
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={cancelStaffSwitch} disabled={staffSwitchBusy}>
+                Cancel
+              </NeoButton>
+              <NeoButton
+                onClick={() => void confirmStaffSwitch()}
+                disabled={
+                  staffSwitchBusy ||
+                  !staffSwitchTo ||
+                  staffSwitchReason.trim().length < 3 ||
+                  freeTables.length === 0
+                }
+              >
+                {staffSwitchBusy ? "Moving…" : "Switch table"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
+      )}
+      {deskCancel && (
+        <div className="staff-confirm-backdrop" onClick={closeDeskCancel} role="presentation">
+          <div
+            className="staff-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="desk-cancel-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="desk-cancel-title">Cancel this order?</h2>
+            <p>
+              <strong>
+                {deskCancel.channel === "swiggy"
+                  ? "Swiggy"
+                  : deskCancel.channel === "zomato"
+                    ? "Zomato"
+                    : "Takeaway"}
+              </strong>
+              {deskCancel.externalOrderId ? ` · ${deskCancel.externalOrderId}` : ""}
+              {" · "}
+              {deskCancel.members?.find((m) => m.isHost)?.displayName ||
+                deskCancel.members?.[0]?.displayName ||
+                "Guest"}
+            </p>
+            <p className="staff-confirm-warn" style={{ marginTop: 0 }}>
+              Kitchen status: <strong>{deskKitchenStatus(deskCancel)}</strong>
+              {(deskCancel.orders || []).some((line) =>
+                ["queued", "preparing", "ready"].includes(line.status),
+              )
+                ? " · Kitchen already has this ticket. Cancelling will stop it."
+                : ""}
+            </p>
+            <ul className="desk-cancel-lines">
+              {(deskCancel.orders || [])
+                .filter((line) => line.status !== "cancelled" && line.status !== "rejected")
+                .map((line) => (
+                  <li key={line.id}>
+                    <span>
+                      {line.qty}× {line.name}
+                      {line.variantLabel ? ` · ${line.variantLabel}` : ""}
+                    </span>
+                    <span className="muted">{line.status.replace(/_/g, " ")}</span>
+                  </li>
+                ))}
+            </ul>
+            <div className="staff-confirm-chips">
+              {DESK_CANCEL_REASONS.map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  className={clsx("chip", deskCancelReason === reason && "chip-on")}
+                  onClick={() => {
+                    setDeskCancelReason(reason);
+                    setDeskCancelError("");
+                  }}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <NeoTextarea
+              label="Reason"
+              rows={3}
+              required
+              autoFocus
+              placeholder="Why are you cancelling this order?"
+              value={deskCancelReason}
+              onChange={(e) => {
+                setDeskCancelReason(e.target.value);
+                if (deskCancelError) setDeskCancelError("");
+              }}
+            />
+            {deskCancelError && <p className="staff-confirm-error">{deskCancelError}</p>}
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={closeDeskCancel} disabled={deskCancelBusy}>
+                Keep order
+              </NeoButton>
+              <NeoButton
+                variant="danger"
+                onClick={confirmDeskCancel}
+                disabled={deskCancelBusy || deskCancelReason.trim().length < 3}
+              >
+                {deskCancelBusy ? "Cancelling…" : "Cancel order"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
+      )}
       {forceClose && (
         <div className="staff-confirm-backdrop" onClick={cancelForceClose} role="presentation">
           <div
@@ -2660,7 +3660,7 @@ export default function StaffDashboard() {
                 dash.tables.find((t: { id: string }) => t.id === orderTable.id)?.assignedWaiterId,
             )?.name || null
           }
-          session={dash.activeSessions?.find((s: { tableId: string }) => s.tableId === orderTable.id)}
+          session={floorSessions.find((s: { tableId: string }) => s.tableId === orderTable.id)}
           onClose={() => setOrderTable(null)}
           onSent={(tokenNumber) => {
             setOrderNotice(`Table ${orderTable.label} · token #${tokenNumber} sent to the kitchen.`);
@@ -2668,6 +3668,68 @@ export default function StaffDashboard() {
             load();
           }}
         />
+      )}
+      {deskOrder && (user.role === "owner" || user.role === "reception") && cafeAcceptingOrders && (
+        <TakeOrderSheet
+          tableId="online"
+          tableLabel={deskOrder === "takeaway" ? "Takeaway" : deskOrder === "swiggy" ? "Swiggy" : "Zomato"}
+          deskChannel={deskOrder}
+          menu={dash.menu}
+          actor={user.email}
+          actorName={user.name}
+          actorId={user.id}
+          onClose={() => setDeskOrder(null)}
+          onSent={(tokenNumber) => {
+            const label = deskOrder === "takeaway" ? "Takeaway" : deskOrder === "swiggy" ? "Swiggy" : "Zomato";
+            setOrderNotice(`${label} · token #${tokenNumber} sent to the kitchen.`);
+            setDeskOrder(null);
+            load();
+          }}
+        />
+      )}
+      {accountOpen && (
+        <div className="staff-confirm-backdrop" onClick={() => !passwordBusy && setAccountOpen(false)} role="presentation">
+          <div
+            className="staff-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="account-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="account-title">Your password</h2>
+            <p>Use the password you sign in with today. The owner can also set a new one from Team.</p>
+            <PasswordInput
+              label="Current password"
+              value={currentPassword}
+              autoComplete="current-password"
+              onChange={(e) => setCurrentPassword(e.target.value)}
+            />
+            <PasswordInput
+              label="New password"
+              value={nextPassword}
+              autoComplete="new-password"
+              onChange={(e) => setNextPassword(e.target.value)}
+            />
+            {passwordErr && <p className="staff-confirm-error">{passwordErr}</p>}
+            {passwordMsg && <p className="form-success-line">{passwordMsg}</p>}
+            {user.role === "owner" && (
+              <NeoButton variant="ghost" onClick={() => void downloadBackup()}>
+                <Download size={15} /> Download backup
+              </NeoButton>
+            )}
+            <div className="staff-confirm-actions">
+              <NeoButton variant="ghost" onClick={() => setAccountOpen(false)} disabled={passwordBusy}>
+                Close
+              </NeoButton>
+              <NeoButton
+                onClick={() => void savePassword()}
+                disabled={passwordBusy || currentPassword.length < 1 || nextPassword.length < 6}
+              >
+                {passwordBusy ? "Saving…" : "Update password"}
+              </NeoButton>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2684,8 +3746,8 @@ function Kpi({ label, value, icon, hot }: { label: string; value: number; icon: 
 
 function Empty({ text }: { text: string }) {
   return (
-    <div className="card-flat muted" style={{ textAlign: "center", padding: "2.5rem" }}>
-      {text}
+    <div className="staff-empty" role="status">
+      <p>{text}</p>
     </div>
   );
 }

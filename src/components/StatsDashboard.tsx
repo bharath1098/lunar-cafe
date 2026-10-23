@@ -31,6 +31,8 @@ import {
   Lightbulb,
   Receipt,
   ShoppingBag,
+  Smartphone,
+  Store,
   Timer,
   Wallet,
 } from "lucide-react";
@@ -73,6 +75,13 @@ const PAYMENT_META: Record<string, { label: string; color: string }> = {
   upi: { label: "UPI", color: PRIMARY },
   cash: { label: "Cash", color: AMBER },
   card: { label: "Card", color: SKY },
+};
+
+const CHANNEL_META: Record<string, { label: string; color: string }> = {
+  dine_in: { label: "Dine-in", color: PRIMARY },
+  takeaway: { label: "Takeaway", color: AMBER },
+  swiggy: { label: "Swiggy", color: "#fc8019" },
+  zomato: { label: "Zomato", color: "#e23744" },
 };
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -605,6 +614,15 @@ export default function StatsDashboard() {
       });
     }
 
+    const topChannel = [...data.channels].sort((a, b) => b.revenue - a.revenue)[0];
+    if (topChannel && data.channels.length > 1) {
+      list.push({
+        icon: topChannel.channel === "dine_in" ? <Store size={16} /> : <Smartphone size={16} />,
+        title: "Top source",
+        text: `${topChannel.label} · ${Math.round((topChannel.revenue / total) * 100)}% · ${topChannel.bills} orders`,
+      });
+    }
+
     return list.slice(0, 4);
   }, [data]);
 
@@ -643,7 +661,9 @@ export default function StatsDashboard() {
       <div className="an-card an-empty">
         <BarChart3 size={40} color="var(--sage-500)" />
         <h2 className="h-display h-md">No sales yet</h2>
-        <p className="muted">Analytics fill in as tables are paid.</p>
+        <p className="muted">
+          Analytics fill in as dine-in, takeaway, Swiggy, and Zomato orders are paid or handed over.
+        </p>
       </div>
     );
   }
@@ -671,6 +691,7 @@ export default function StatsDashboard() {
   const paymentTotal = data.payments.reduce((s, p) => s + p.revenue, 0) || 1;
   const categoryTotal = data.categories.reduce((s, c) => s + c.revenue, 0) || 1;
   const sectionTotal = data.sections.reduce((s, c) => s + c.revenue, 0) || 1;
+  const channelTotal = data.channels.reduce((s, c) => s + c.revenue, 0) || 1;
 
   return (
     <div className={clsx("an-wrap", loading && "is-loading")}>
@@ -930,63 +951,69 @@ export default function StatsDashboard() {
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Payment mix" subtitle="Share of collected revenue">
-              <div className="an-pay">
-              <div className="an-donut">
-                <ResponsiveContainer width="100%" height={donutH}>
-                  <PieChart>
-                    <Pie
-                      data={data.payments}
-                      dataKey="revenue"
-                      nameKey="method"
-                      innerRadius={donutInner}
-                      outerRadius={donutOuter}
-                      paddingAngle={3}
-                      cornerRadius={5}
-                      stroke="none"
-                      animationDuration={500}
-                    >
-                      {data.payments.map((p) => (
-                        <Cell key={p.method} fill={PAYMENT_META[p.method]?.color ?? PRIMARY} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      content={
-                        <ChartTooltip
-                          render={(p: PaymentPoint) => (
-                            <>
-                              <b>{PAYMENT_META[p.method]?.label ?? p.method}</b>
-                              <div>
-                                <span>Revenue</span>
-                                <strong>{inr(p.revenue)}</strong>
-                              </div>
-                              <div>
-                                <span>Bills</span>
-                                <strong>{p.bills}</strong>
-                              </div>
-                            </>
-                          )}
+            <Card title="Payment mix" subtitle="Cash, UPI, and card from dine-in and takeaway">
+              {data.payments.length > 0 ? (
+                <div className="an-pay">
+                  <div className="an-donut">
+                    <ResponsiveContainer width="100%" height={donutH}>
+                      <PieChart>
+                        <Pie
+                          data={data.payments}
+                          dataKey="revenue"
+                          nameKey="method"
+                          innerRadius={donutInner}
+                          outerRadius={donutOuter}
+                          paddingAngle={3}
+                          cornerRadius={5}
+                          stroke="none"
+                          animationDuration={500}
+                        >
+                          {data.payments.map((p) => (
+                            <Cell key={p.method} fill={PAYMENT_META[p.method]?.color ?? PRIMARY} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          content={
+                            <ChartTooltip
+                              render={(p: PaymentPoint) => (
+                                <>
+                                  <b>{PAYMENT_META[p.method]?.label ?? p.method}</b>
+                                  <div>
+                                    <span>Revenue</span>
+                                    <strong>{inr(p.revenue)}</strong>
+                                  </div>
+                                  <div>
+                                    <span>Bills</span>
+                                    <strong>{p.bills}</strong>
+                                  </div>
+                                </>
+                              )}
+                            />
+                          }
                         />
-                      }
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="an-donut-center">
-                  <b>{totals.bills}</b>
-                  <span>bills</span>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="an-donut-center">
+                      <b>{data.payments.reduce((n, p) => n + p.bills, 0)}</b>
+                      <span>bills</span>
+                    </div>
+                  </div>
+                  <ul className="an-legend">
+                    {data.payments.map((p) => (
+                      <li key={p.method}>
+                        <i style={{ background: PAYMENT_META[p.method]?.color ?? PRIMARY }} />
+                        <span>{PAYMENT_META[p.method]?.label ?? p.method}</span>
+                        <b>{inr(p.revenue)}</b>
+                        <em>{Math.round((p.revenue / paymentTotal) * 100)}%</em>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              </div>
-              <ul className="an-legend">
-                {data.payments.map((p) => (
-                  <li key={p.method}>
-                    <i style={{ background: PAYMENT_META[p.method]?.color ?? PRIMARY }} />
-                    <span>{PAYMENT_META[p.method]?.label ?? p.method}</span>
-                    <b>{inr(p.revenue)}</b>
-                    <em>{Math.round((p.revenue / paymentTotal) * 100)}%</em>
-                  </li>
-                ))}
-              </ul>
-              </div>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>
+                  No counter payments in this period. Swiggy and Zomato stay on their platforms.
+                </p>
+              )}
             </Card>
           </div>
 
@@ -1082,49 +1109,97 @@ export default function StatsDashboard() {
             </Card>
           </div>
 
-          {/* Tables + breakdown */}
+          {/* Order source */}
           <div className="an-grid an-grid-2">
-            <Card title="Where guests sit" subtitle="Indoor vs outdoor and the top tables">
-              {data.sections.length > 0 && (
-                <div className="an-split">
-                  <div className="an-split-bar">
-                    {data.sections.map((s) => (
-                      <i
-                        key={s.section}
-                        className={s.section === "indoor" ? "is-indoor" : "is-outdoor"}
-                        style={{ width: `${(s.revenue / sectionTotal) * 100}%` }}
-                      />
-                    ))}
+            <Card title="Order source" subtitle="Dine-in, takeaway, Swiggy, and Zomato">
+              {data.channels.length > 0 ? (
+                <>
+                  <div className="an-split">
+                    <div className="an-split-bar">
+                      {data.channels.map((c) => (
+                        <i
+                          key={c.channel}
+                          style={{
+                            width: `${(c.revenue / channelTotal) * 100}%`,
+                            background: CHANNEL_META[c.channel]?.color ?? PRIMARY,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <div className="an-split-legend">
+                      {data.channels.map((c) => (
+                        <span key={c.channel}>
+                          <i style={{ background: CHANNEL_META[c.channel]?.color ?? PRIMARY }} />
+                          <span>{c.label}</span>
+                          <b>{Math.round((c.revenue / channelTotal) * 100)}%</b>
+                          <em>
+                            {c.bills} {c.bills === 1 ? "order" : "orders"}
+                          </em>
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="an-split-legend">
-                    {data.sections.map((s) => (
-                      <span key={s.section}>
-                        <i className={s.section === "indoor" ? "is-indoor" : "is-outdoor"} />
-                        <span style={{ textTransform: "capitalize" }}>{s.section}</span>
-                        <b>{Math.round((s.revenue / sectionTotal) * 100)}%</b>
-                        <em>{s.bills} bills</em>
-                      </span>
-                    ))}
-                  </div>
-                </div>
+                  <RankList
+                    rows={data.channels.map((c) => ({
+                      key: c.channel,
+                      name: c.label,
+                      meta: `${c.items} items · ${c.bills} ${c.bills === 1 ? "order" : "orders"}`,
+                      value: c.revenue,
+                      right: inr(c.revenue / Math.max(1, c.bills)) + " / order",
+                    }))}
+                    format={(n) => inr(n)}
+                    empty="No source data yet."
+                  />
+                </>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>
+                  No paid or handed-over orders in this period.
+                </p>
               )}
-              <RankList
-                rows={data.tables.slice(0, 5).map((t) => ({
-                  key: t.tableId,
-                  name: t.label,
-                  meta: `${cap(t.section)} · ${t.bills} ${t.bills === 1 ? "bill" : "bills"}`,
-                  value: t.revenue,
-                  right: inr(t.revenue / Math.max(1, t.bills)) + " / bill",
-                }))}
-                format={(n) => inr(n)}
-                empty="No table data yet."
-              />
             </Card>
 
             <Card title="Revenue breakdown" subtitle="From item sales to cash collected">
               <BreakdownTable totals={totals} previous={previous} />
             </Card>
           </div>
+
+          {/* Tables */}
+          <Card title="Where guests sit" subtitle="Dine-in only · indoor vs outdoor and top tables">
+            {data.sections.length > 0 && (
+              <div className="an-split">
+                <div className="an-split-bar">
+                  {data.sections.map((s) => (
+                    <i
+                      key={s.section}
+                      className={s.section === "indoor" ? "is-indoor" : "is-outdoor"}
+                      style={{ width: `${(s.revenue / sectionTotal) * 100}%` }}
+                    />
+                  ))}
+                </div>
+                <div className="an-split-legend">
+                  {data.sections.map((s) => (
+                    <span key={s.section}>
+                      <i className={s.section === "indoor" ? "is-indoor" : "is-outdoor"} />
+                      <span style={{ textTransform: "capitalize" }}>{s.section}</span>
+                      <b>{Math.round((s.revenue / sectionTotal) * 100)}%</b>
+                      <em>{s.bills} bills</em>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <RankList
+              rows={data.tables.slice(0, 5).map((t) => ({
+                key: t.tableId,
+                name: t.label,
+                meta: `${cap(t.section)} · ${t.bills} ${t.bills === 1 ? "bill" : "bills"}`,
+                value: t.revenue,
+                right: inr(t.revenue / Math.max(1, t.bills)) + " / bill",
+              }))}
+              format={(n) => inr(n)}
+              empty="No dine-in table data yet."
+            />
+          </Card>
         </>
       )}
     </div>
@@ -1181,8 +1256,8 @@ function BreakdownTable({
           </div>
         )}
       </div>
-      <p className="an-insight-foot">
-        <Lightbulb size={14} /> Revenue here is the bill total guests paid, including GST and service charge.
+        <p className="an-insight-foot">
+        <Lightbulb size={14} /> Revenue includes dine-in and takeaway bills, plus Swiggy and Zomato orders handed over. GST and service charge apply where charged.
       </p>
     </div>
   );

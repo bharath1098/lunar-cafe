@@ -9,13 +9,17 @@ import clsx from "clsx";
 import {
   ArrowUpRight,
   Clock,
+  Mail,
   Menu as MenuIcon,
   Phone,
   MapPin,
   X,
 } from "lucide-react";
+import { ClosingSoonBanner } from "./ClosingSoonBanner";
 import { usePrefs } from "./Providers";
 import { PreferenceMenu } from "./PreferenceMenu";
+import { SiteSearch } from "./SiteSearch";
+import { CopyButton } from "./CopyButton";
 import { CAFE } from "@/lib/cafe";
 import { CAFE_MEDIA } from "@/lib/media";
 
@@ -51,6 +55,7 @@ export function SiteHeader() {
   return (
     <>
       <header className={clsx("site-header on-dark", scrolled && "scrolled")}>
+        <ClosingSoonBanner />
         <div className="header-inner">
           <Link href="/" className="brand" aria-label="Lunar Cafe home">
             <span className="brand-mark">
@@ -82,6 +87,7 @@ export function SiteHeader() {
           </nav>
 
           <div className="header-tools">
+            <SiteSearch />
             <PreferenceMenu />
             <Link href="/reserve" className="btn btn-gold btn-sm">
               {tr.reserve}
@@ -155,11 +161,13 @@ export function SiteFooter() {
   const { tr } = usePrefs();
   const mapsHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(CAFE.mapsQuery)}`;
   const telHref = `tel:${CAFE.phoneDisplay.replace(/\s/g, "")}`;
+  const mailHref = `mailto:${CAFE.email}`;
   const explore = [
     { href: "/menu", label: tr.menu },
     { href: "/about", label: tr.about },
     { href: "/gallery", label: tr.gallery },
     { href: "/loyalty", label: tr.loyalty },
+    { href: "/faq", label: "FAQ" },
     { href: "/feedback", label: tr.feedback },
     { href: "/contact", label: tr.contact },
   ];
@@ -174,7 +182,7 @@ export function SiteFooter() {
       <div className="wrap">
         <div className="footer-grid">
           <div className="footer-brand">
-            <div className="brand">
+            <Link href="/" className="brand" aria-label="Lunar Cafe home">
               <span className="brand-mark">
                 <Image
                   src={CAFE_MEDIA.logo}
@@ -188,7 +196,7 @@ export function SiteFooter() {
                 <strong>LUNAR</strong>
                 <small>CAFE</small>
               </span>
-            </div>
+            </Link>
             <p className="footer-tagline">{CAFE.tagline}</p>
             <div className="footer-cta">
               <Link href="/reserve" className="footer-cta-btn is-primary">
@@ -251,6 +259,15 @@ export function SiteFooter() {
                   <small>{CAFE.phoneDisplay}</small>
                 </span>
               </a>
+              <div className="footer-fact">
+                <span className="footer-ico">
+                  <Mail size={15} />
+                </span>
+                <span className="footer-email-line">
+                  <a href={mailHref}>{CAFE.email}</a>
+                  <CopyButton value={CAFE.email} label="Copy email" iconOnly />
+                </span>
+              </div>
             </div>
           </div>
 
@@ -277,6 +294,18 @@ export function SiteFooter() {
         </div>
         <p className="footer-legal">
           © {new Date().getFullYear()} Lunar Cafe · GSTIN {CAFE.gstin}
+          <span className="footer-legal-dot" aria-hidden>
+            ·
+          </span>
+          Last updated {CAFE.updated}
+          <span className="footer-legal-dot" aria-hidden>
+            ·
+          </span>
+          <Link href="/privacy">Privacy</Link>
+          <span className="footer-legal-dot" aria-hidden>
+            ·
+          </span>
+          <Link href="/terms">Terms</Link>
           <span className="footer-legal-dot" aria-hidden>
             ·
           </span>

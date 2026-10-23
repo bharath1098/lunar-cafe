@@ -4,6 +4,8 @@ export type TableSection = "indoor" | "outdoor";
 
 export type SessionStatus = "active" | "billing" | "closed";
 
+export type OrderChannel = "dine_in" | "takeaway" | "swiggy" | "zomato";
+
 export type OrderItemStatus =
   | "pending_approval"
   | "rejected"
@@ -96,6 +98,8 @@ export interface OrderLine {
   rejectReason?: string;
   tokenNumber?: number;
   orderedByMemberId: string;
+  /** Table where this ticket was placed (stays set after a table switch). */
+  tableId?: string;
   /** Staff member who sent this ticket to the kitchen (waiter / reception / owner). */
   takenByStaffId?: string;
   takenByStaffName?: string;
@@ -106,6 +110,15 @@ export interface OrderLine {
   isCoverOrder?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TableSwitchRecord {
+  fromTableId: string;
+  toTableId: string;
+  reason: string;
+  requestedBy?: string;
+  approvedBy: string;
+  at: string;
 }
 
 export interface OrderBatch {
@@ -119,6 +132,12 @@ export interface OrderBatch {
 export interface TableSession {
   id: string;
   tableId: string;
+  /** Dine-in is the floor. Swiggy, Zomato, and takeaway have no table. */
+  channel?: OrderChannel;
+  /** Swiggy or Zomato order number, when reception copies one in. */
+  externalOrderId?: string;
+  /** Rider or packing note for an online order. */
+  orderNote?: string;
   groupCode: string;
   status: SessionStatus;
   hostMemberId: string;
@@ -144,6 +163,19 @@ export interface TableSession {
   forceClosedAt?: string;
   forceCloseReason?: string;
   forceClosedBy?: string;
+  /** Desk cancel for Swiggy, Zomato, or takeaway. */
+  cancelReason?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  /** Set when the table was closed automatically after the post-close grace period. */
+  autoClosedAt?: string;
+  /** Bill still needs a payment update after an automatic close. */
+  settlementPending?: boolean;
+  tableSwitchRequestedAt?: string;
+  tableSwitchRequestedByMemberId?: string;
+  tableSwitchRequestedByName?: string;
+  tableSwitchReason?: string;
+  tableSwitches?: TableSwitchRecord[];
   createdAt: string;
   updatedAt: string;
 }
@@ -221,11 +253,15 @@ export interface AppSettings {
   /** Local cafe hours as HH:mm (Asia/Kolkata). */
   hoursStart: string;
   hoursEnd: string;
+  /** Same-night close override. Service date is YYYY-MM-DD in Asia/Kolkata. */
+  hoursEndOverrideDate?: string;
+  /** HH:mm close time used only on hoursEndOverrideDate. */
+  hoursEndOverride?: string;
 }
 
 export interface StaffAlert {
   id: string;
-  type: "waiter_reassigned" | "cover_order";
+  type: "waiter_reassigned" | "cover_order" | "table_switch_request" | "online_order";
   tableId: string;
   tableLabel: string;
   message: string;

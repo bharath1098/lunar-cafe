@@ -98,15 +98,18 @@ export function ScrollHint({
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      // Don't capture yet — a still click must reach the card <a>.
       drag.current = { x: e.clientX, origin: target.current, moved: false };
       paused.current = true;
-      wrap?.setPointerCapture?.(e.pointerId);
     };
     const onPointerMove = (e: PointerEvent) => {
       const d = drag.current;
       if (!d) return;
       const dx = e.clientX - d.x;
-      if (!d.moved && Math.abs(dx) > 6) d.moved = true;
+      if (!d.moved && Math.abs(dx) > 10) {
+        d.moved = true;
+        wrap?.setPointerCapture?.(e.pointerId);
+      }
       if (d.moved) {
         e.preventDefault();
         target.current = d.origin - dx;
@@ -115,12 +118,12 @@ export function ScrollHint({
     const endDrag = (e: PointerEvent) => {
       const d = drag.current;
       drag.current = null;
-      try {
-        wrap?.releasePointerCapture?.(e.pointerId);
-      } catch {
-        /* already released */
-      }
       if (d?.moved) {
+        try {
+          wrap?.releasePointerCapture?.(e.pointerId);
+        } catch {
+          /* already released */
+        }
         // Block the click that follows a drag so links don't navigate.
         const block = (ev: Event) => {
           ev.preventDefault();

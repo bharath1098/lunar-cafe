@@ -6,6 +6,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode 
 import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
 import {
+  ArrowLeftRight,
   Check,
   ChevronDown,
   Compass,
@@ -23,6 +24,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { ClosingSoonBanner } from "@/components/ClosingSoonBanner";
 import { NeoButton, NeoSelect, NeoTextarea } from "@/components/Neo";
 import { usePrefs } from "@/components/Providers";
 import { CategoryBar } from "@/components/CategoryBar";
@@ -52,6 +54,8 @@ type Payload = {
     acceptingOrders: boolean;
     hoursLabel: string;
     localTimeLabel: string;
+    closingSoon?: boolean;
+    minutesUntilClose?: number | null;
     reason?: string;
   };
 };
@@ -90,6 +94,10 @@ export default function OrderPage({
   const [openVisitId, setOpenVisitId] = useState<string | null>(null);
   const [reorderingKey, setReorderingKey] = useState<string | null>(null);
   const [requestingBill, setRequestingBill] = useState(false);
+  const [switchOpen, setSwitchOpen] = useState(false);
+  const [switchReason, setSwitchReason] = useState("");
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchError, setSwitchError] = useState("");
   const [menuView, setMenuView] = useState<"card" | "present">("present");
   const [moreCatsOpen, setMoreCatsOpen] = useState(false);
   const [vegOnly, setVegOnly] = useState(false);
@@ -268,6 +276,39 @@ export default function OrderPage({
       load();
     } finally {
       setRequestingBill(false);
+    }
+  }
+
+  async function submitTableSwitch() {
+    if (!memberId || switchBusy) return;
+    const reason = switchReason.trim();
+    if (reason.length < 3) {
+      setSwitchError("Please mention why this table is uncomfortable (at least 3 characters).");
+      return;
+    }
+    setSwitchBusy(true);
+    setSwitchError("");
+    try {
+      const res = await fetch(`/api/session/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "request_table_switch",
+          memberId,
+          reason,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setSwitchError(json.error || "Could not request a table switch");
+        return;
+      }
+      setSwitchOpen(false);
+      setSwitchReason("");
+      setMsg("Table switch requested — staff will move you to another table.");
+      load();
+    } finally {
+      setSwitchBusy(false);
     }
   }
 
@@ -555,7 +596,7 @@ export default function OrderPage({
             . Reception will apply any discount or loyalty, then generate the bill.
           </p>
         ) : (
-          <div style={{ marginTop: "0.9rem" }}>
+          <div style={{ marginTop: "0.9rem", display: "grid", gap: "0.55rem" }}>
             <NeoButton
               className="w-full"
               disabled={!memberId || requestingBill}
@@ -564,7 +605,66 @@ export default function OrderPage({
               <Receipt size={16} />
               {requestingBill ? "Requesting…" : "Request bill"}
             </NeoButton>
+            {live.session.tableSwitchRequestedAt ? (
+              <p className="bill-requested-note" style={{ margin: 0 }}>
+                Switch requested
+                {live.session.tableSwitchRequestedByName
+                  ? ` by ${live.session.tableSwitchRequestedByName}`
+                  : ""}
+                . Waiting for staff to move your table.
+              </p>
+            ) : (
+              <NeoButton
+                variant="ghost"
+                className="w-full"
+                disabled={!memberId || Boolean(live.session.billGeneratedAt)}
+                onClick={() => {
+                  setSwitchError("");
+                  setSwitchOpen(true);
+                }}
+              >
+                <ArrowLeftRight size={16} />
+                Switch table
+              </NeoButton>
+            )}
           </div>
+        )}
+        {live.session.billRequestedAt &&
+          !live.session.billGeneratedAt &&
+          (live.session.tableSwitchRequestedAt ? (
+            <p className="bill-requested-note" style={{ marginTop: "0.75rem" }}>
+              Switch requested
+              {live.session.tableSwitchRequestedByName
+                ? ` by ${live.session.tableSwitchRequestedByName}`
+                : ""}
+              . Waiting for staff to move your table.
+            </p>
+          ) : (
+            <div style={{ marginTop: "0.75rem" }}>
+              <NeoButton
+                variant="ghost"
+                className="w-full"
+                disabled={!memberId}
+                onClick={() => {
+                  setSwitchError("");
+                  setSwitchOpen(true);
+                }}
+              >
+                <ArrowLeftRight size={16} />
+                Switch table
+              </NeoButton>
+            </div>
+          ))}
+        {live.session.tableSwitches && live.session.tableSwitches.length > 0 && (
+          <p className="muted" style={{ margin: "0.65rem 0 0", fontSize: "0.78rem" }}>
+            Moved from{" "}
+            {live.session.tableSwitches
+              .map(
+                (sw) =>
+                  `${sw.fromTableId.replace("lunar-", "").toUpperCase()} → ${sw.toTableId.replace("lunar-", "").toUpperCase()}`,
+              )
+              .join(", ")}
+          </p>
         )}
       </div>
 
@@ -573,9 +673,10 @@ export default function OrderPage({
           {live.session.orders.length === 0 && (
             <p className="muted" style={{ fontSize: "0.9rem" }}>No orders placed yet.</p>
           )}
-          {live.session.orders.map((o) => (
-            <OrderRow key={o.id} order={o} />
-          ))}
+          <OrdersByTable
+            orders={live.session.orders}
+            currentTableId={live.session.tableId}
+          />
         </div>
       </>
     );
@@ -583,6 +684,7 @@ export default function OrderPage({
 
   return (
     <div className="order-page">
+      <ClosingSoonBanner ordering={live.ordering} />
       <header className="order-top">
         <div className="order-top-inner">
           <div className="order-top-identity">
@@ -984,6 +1086,80 @@ export default function OrderPage({
           </>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {switchOpen && (
+          <>
+            <motion.div
+              className="sheet-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !switchBusy && setSwitchOpen(false)}
+            />
+            <motion.div
+              className="sheet"
+              role="dialog"
+              aria-label="Request table switch"
+              style={{ background: "var(--cream-100)", padding: "1.1rem 1rem 1.25rem" }}
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 260 }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <strong className="h-display" style={{ fontSize: "1.15rem" }}>
+                  Switch table
+                </strong>
+                <button
+                  className="burger"
+                  style={{ display: "grid" }}
+                  aria-label="Close"
+                  disabled={switchBusy}
+                  onClick={() => setSwitchOpen(false)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="muted" style={{ margin: "0 0 0.85rem", fontSize: "0.88rem" }}>
+                Tell us what feels uncomfortable. Staff will pick a free table and move your order.
+              </p>
+              <NeoTextarea
+                label="Reason for discomfort"
+                value={switchReason}
+                onChange={(e) => {
+                  setSwitchReason(e.target.value);
+                  if (switchError) setSwitchError("");
+                }}
+                rows={3}
+                maxLength={280}
+              />
+              {switchError && (
+                <p style={{ color: "#c45a6a", fontSize: "0.84rem", margin: "0.45rem 0 0" }}>
+                  {switchError}
+                </p>
+              )}
+              <div style={{ display: "flex", gap: "0.55rem", marginTop: "0.95rem" }}>
+                <NeoButton
+                  variant="ghost"
+                  className="flex-1"
+                  disabled={switchBusy}
+                  onClick={() => setSwitchOpen(false)}
+                >
+                  Cancel
+                </NeoButton>
+                <NeoButton
+                  className="flex-1"
+                  disabled={switchBusy || switchReason.trim().length < 3}
+                  onClick={() => void submitTableSwitch()}
+                >
+                  {switchBusy ? "Sending…" : "Request switch"}
+                </NeoButton>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1077,6 +1253,44 @@ function formatVisitDate(iso: string) {
   } catch {
     return iso.slice(0, 10);
   }
+}
+
+function shortTable(tableId: string) {
+  return tableId.replace(/^lunar-/i, "").toUpperCase();
+}
+
+function OrdersByTable({
+  orders,
+  currentTableId,
+}: {
+  orders: OrderLine[];
+  currentTableId: string;
+}) {
+  const sorted = [...orders].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  let lastTable = "";
+  const showSplits = sorted.some((o) => (o.tableId || currentTableId) !== currentTableId)
+    || new Set(sorted.map((o) => o.tableId || currentTableId)).size > 1;
+
+  return (
+    <>
+      {sorted.map((o) => {
+        const tableId = o.tableId || currentTableId;
+        const showHead = showSplits && tableId !== lastTable;
+        lastTable = tableId;
+        return (
+          <div key={o.id}>
+            {showHead && (
+              <p className="order-table-split">
+                Placed at table {shortTable(tableId)}
+                {tableId === currentTableId ? " (current)" : ""}
+              </p>
+            )}
+            <OrderRow order={o} />
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 function OrderRow({ order }: { order: OrderLine }) {

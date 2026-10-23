@@ -12,6 +12,7 @@ import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import { ApiLoader } from "@/components/ApiLoader";
 import { IntroSplash } from "@/components/IntroSplash";
+import { captureUtm } from "@/lib/utm";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
@@ -36,6 +37,34 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
   const [currency, setCurrencyState] = useState("INR");
   const [theme, setThemeState] = useState<ThemeMode>("light");
+
+  useEffect(() => {
+    captureUtm();
+    const report = (message: string, stack?: string) => {
+      if (!message || message.includes("ResizeObserver")) return;
+      void fetch("/api/client-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({
+          message: message.slice(0, 500),
+          path: location.pathname,
+          stack: (stack || "").slice(0, 1500),
+        }),
+      }).catch(() => {});
+    };
+    const onError = (event: ErrorEvent) => report(event.message, event.error?.stack);
+    const onReject = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as { message?: string; stack?: string } | undefined;
+      report(reason?.message || String(event.reason), reason?.stack);
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onReject);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onReject);
+    };
+  }, []);
 
   useEffect(() => {
     const l = localStorage.getItem("lunar-locale") as Locale | null;

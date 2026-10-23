@@ -33,7 +33,7 @@ declare global {
   var __lunarSchemaVersion: number | undefined;
 }
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 5;
 
 /** True when TURSO_DATABASE_URL points at a remote Turso DB (Vercel / prod). */
 export function isRemoteTurso() {
@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS settings (
   orders_open INTEGER NOT NULL DEFAULT 1,
   allow_after_hours INTEGER NOT NULL DEFAULT 0,
   hours_start TEXT NOT NULL DEFAULT '11:00',
-  hours_end TEXT NOT NULL DEFAULT '23:30'
+  hours_end TEXT NOT NULL DEFAULT '23:30',
+  hours_end_override TEXT,
+  hours_end_override_date TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tables (
@@ -126,6 +128,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   bill_generated_at TEXT,
   payment_submitted_at TEXT,
   payment_awaiting_approval INTEGER,
+  auto_closed_at TEXT,
+  settlement_pending INTEGER,
+  channel TEXT NOT NULL DEFAULT 'dine_in',
+  external_order_id TEXT,
+  order_note TEXT,
+  cancel_reason TEXT,
+  cancelled_at TEXT,
+  cancelled_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   sort_order INTEGER NOT NULL
@@ -261,11 +271,21 @@ const COLUMN_MIGRATIONS = [
   "ALTER TABLE settings ADD COLUMN allow_after_hours INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE settings ADD COLUMN hours_start TEXT NOT NULL DEFAULT '11:00'",
   "ALTER TABLE settings ADD COLUMN hours_end TEXT NOT NULL DEFAULT '23:30'",
+  "ALTER TABLE settings ADD COLUMN hours_end_override TEXT",
+  "ALTER TABLE settings ADD COLUMN hours_end_override_date TEXT",
+  "ALTER TABLE sessions ADD COLUMN auto_closed_at TEXT",
+  "ALTER TABLE sessions ADD COLUMN settlement_pending INTEGER",
   "ALTER TABLE order_lines ADD COLUMN taken_by_staff_id TEXT",
   "ALTER TABLE order_lines ADD COLUMN taken_by_staff_name TEXT",
   "ALTER TABLE order_lines ADD COLUMN assigned_waiter_id TEXT",
   "ALTER TABLE order_lines ADD COLUMN assigned_waiter_name TEXT",
   "ALTER TABLE order_lines ADD COLUMN is_cover_order INTEGER",
+  "ALTER TABLE sessions ADD COLUMN channel TEXT NOT NULL DEFAULT 'dine_in'",
+  "ALTER TABLE sessions ADD COLUMN external_order_id TEXT",
+  "ALTER TABLE sessions ADD COLUMN order_note TEXT",
+  "ALTER TABLE sessions ADD COLUMN cancel_reason TEXT",
+  "ALTER TABLE sessions ADD COLUMN cancelled_at TEXT",
+  "ALTER TABLE sessions ADD COLUMN cancelled_by TEXT",
 ];
 
 async function applySchema(client: Client) {
@@ -441,6 +461,14 @@ function readSession(row: Row, children: {
   return {
     id,
     tableId: text(row.table_id),
+    channel: (["takeaway", "swiggy", "zomato"].includes(String(row.channel))
+      ? text(row.channel)
+      : "dine_in") as TableSession["channel"],
+    externalOrderId: textOpt(row.external_order_id),
+    orderNote: textOpt(row.order_note),
+    cancelReason: textOpt(row.cancel_reason),
+    cancelledAt: textOpt(row.cancelled_at),
+    cancelledBy: textOpt(row.cancelled_by),
     groupCode: text(row.group_code),
     status: text(row.status) as TableSession["status"],
     hostMemberId: text(row.host_member_id),
@@ -463,6 +491,8 @@ function readSession(row: Row, children: {
     billGeneratedAt: textOpt(row.bill_generated_at),
     paymentSubmittedAt: textOpt(row.payment_submitted_at),
     paymentAwaitingApproval: flag(row.payment_awaiting_approval),
+    autoClosedAt: textOpt(row.auto_closed_at),
+    settlementPending: Number(row.settlement_pending) === 1,
     createdAt: text(row.created_at),
     updatedAt: text(row.updated_at),
   };
@@ -522,6 +552,8 @@ export async function readStore(): Promise<CafeStore | null> {
     allowAfterHours: Number(settings.allow_after_hours) === 1,
     hoursStart: textOpt(settings.hours_start) || CAFE.hoursStart,
     hoursEnd: textOpt(settings.hours_end) || CAFE.hoursEnd,
+    hoursEndOverride: textOpt(settings.hours_end_override),
+    hoursEndOverrideDate: textOpt(settings.hours_end_override_date),
   };
 
   return {
@@ -652,13 +684,15 @@ export async function writeStore(store: CafeStore) {
       loyalty_earn_per_rupees, loyalty_points_per_earn, loyalty_redeem_points,
       loyalty_redeem_value, welcome_bonus_points, next_bill_number,
       next_token_number, business_day_start_hour,
-      orders_open, allow_after_hours, hours_start, hours_end
+      orders_open, allow_after_hours, hours_start, hours_end,
+      hours_end_override, hours_end_override_date
     ) VALUES (
       1, :cafe_id, :cgst_percent, :sgst_percent, :service_charge_percent,
       :loyalty_earn_per_rupees, :loyalty_points_per_earn, :loyalty_redeem_points,
       :loyalty_redeem_value, :welcome_bonus_points, :next_bill_number,
       :next_token_number, :business_day_start_hour,
-      :orders_open, :allow_after_hours, :hours_start, :hours_end
+      :orders_open, :allow_after_hours, :hours_start, :hours_end,
+      :hours_end_override, :hours_end_override_date
     )`,
       args: {
         cafe_id: store.cafeId,
@@ -677,6 +711,8 @@ export async function writeStore(store: CafeStore) {
         allow_after_hours: settings.allowAfterHours ? 1 : 0,
         hours_start: settings.hoursStart || CAFE.hoursStart,
         hours_end: settings.hoursEnd || CAFE.hoursEnd,
+        hours_end_override: nullable(settings.hoursEndOverride),
+        hours_end_override_date: nullable(settings.hoursEndOverrideDate),
       },
     },
   ];
@@ -748,17 +784,27 @@ export async function writeStore(store: CafeStore) {
       discount_percent, discount_amount, loyalty_phone, loyalty_points_redeemed,
       reservation_id, bill_number, paid_at, payment_method, bill_requested_at,
       bill_requested_by_member_id, bill_requested_by_name, bill_generated_at,
-      payment_submitted_at, payment_awaiting_approval, created_at, updated_at, sort_order
+      payment_submitted_at, payment_awaiting_approval, auto_closed_at, settlement_pending,
+      created_at, updated_at, sort_order, channel, external_order_id, order_note,
+      cancel_reason, cancelled_at, cancelled_by
     ) VALUES (
       :id, :table_id, :group_code, :status, :host_member_id, :service_charge_enabled,
       :discount_percent, :discount_amount, :loyalty_phone, :loyalty_points_redeemed,
       :reservation_id, :bill_number, :paid_at, :payment_method, :bill_requested_at,
       :bill_requested_by_member_id, :bill_requested_by_name, :bill_generated_at,
-      :payment_submitted_at, :payment_awaiting_approval, :created_at, :updated_at, :sort_order
+      :payment_submitted_at, :payment_awaiting_approval, :auto_closed_at, :settlement_pending,
+      :created_at, :updated_at, :sort_order, :channel, :external_order_id, :order_note,
+      :cancel_reason, :cancelled_at, :cancelled_by
     )`,
       args: {
         id: session.id,
         table_id: session.tableId,
+        channel: session.channel || "dine_in",
+        external_order_id: nullable(session.externalOrderId),
+        order_note: nullable(session.orderNote),
+        cancel_reason: nullable(session.cancelReason),
+        cancelled_at: nullable(session.cancelledAt),
+        cancelled_by: nullable(session.cancelledBy),
         group_code: session.groupCode,
         status: session.status,
         host_member_id: session.hostMemberId,
@@ -777,6 +823,8 @@ export async function writeStore(store: CafeStore) {
         bill_generated_at: nullable(session.billGeneratedAt),
         payment_submitted_at: nullable(session.paymentSubmittedAt),
         payment_awaiting_approval: bit(session.paymentAwaitingApproval),
+        auto_closed_at: nullable(session.autoClosedAt),
+        settlement_pending: session.settlementPending ? 1 : 0,
         created_at: session.createdAt,
         updated_at: session.updatedAt,
         sort_order,

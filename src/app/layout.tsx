@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Plus_Jakarta_Sans } from "next/font/google";
+import { JsonLd } from "@/components/JsonLd";
 import { Providers } from "@/components/Providers";
+import { cafeJsonLd } from "@/lib/jsonld";
+import { siteUrl } from "@/lib/site";
 import "./globals.css";
 
 const display = Fraunces({
@@ -16,10 +19,25 @@ const body = Plus_Jakarta_Sans({
   weight: ["400", "500", "600", "700", "800"],
 });
 
+const description =
+  "Lunar Cafe in Jubilee Hills, Hyderabad. Coffee, mocktails and fusion plates, open daily 11:00 AM–11:30 PM. Reserve a table or scan the QR to order.";
+
 export const metadata: Metadata = {
-  title: "Lunar Cafe | Jubilee Hills, Hyderabad",
-  description:
-    "A space to pause. A place to connect. Moments that matter. Artisanal coffee and gourmet fusion at Lunar Cafe, Jubilee Hills.",
+  metadataBase: new URL(siteUrl()),
+  title: {
+    default: "Lunar Cafe | Coffee and Dining in Jubilee Hills",
+    template: "%s · Lunar Cafe",
+  },
+  description,
+  openGraph: {
+    type: "website",
+    locale: "en_IN",
+    siteName: "Lunar Cafe",
+    images: [{ url: "/media/cafe/lunar-logo.jpg", alt: "Lunar Cafe logo" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
   icons: {
     icon: "/media/cafe/lunar-logo.jpg",
     apple: "/media/cafe/lunar-logo.jpg",
@@ -64,6 +82,7 @@ export default function RootLayout({
         />
       </head>
       <body className={`${display.variable} ${body.variable} antialiased`}>
+        <JsonLd data={cafeJsonLd()} />
         <Providers>{children}</Providers>
       </body>
     </html>

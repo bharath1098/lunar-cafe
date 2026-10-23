@@ -6,7 +6,14 @@ import { billableOrders, generateGroupCode } from "./bill";
 import { readStore, writeStore } from "./db";
 import { imageForMenuItem } from "./media";
 import { SEED_MENU } from "./menu-data";
-import { assertAcceptingOrders, getOrderingStatus } from "./ordering-hours";
+import {
+  assertAcceptingOrders,
+  canonicalHm,
+  currentOpeningMs,
+  effectiveClose,
+  getOrderingStatus,
+  validateHoursExtension,
+} from "./ordering-hours";
 import type {
   AppSettings,
   CafeStore,
@@ -23,6 +30,7 @@ import type {
   TableSection,
   TableSession,
   VisitItem,
+  OrderChannel,
 } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -116,14 +124,18 @@ function buildStaff(): StaffUser[] {
   ];
 }
 
+/** True when the owner set a photo (uploads) instead of a stock menu placeholder. */
+function isCustomMenuImage(image?: string) {
+  if (!image) return false;
+  if (image.startsWith("/media/uploads/")) return true;
+  return !image.startsWith("/media/menu/") && !image.startsWith("/media/cafe/");
+}
+
 /** Recompute dummy images on every load so new photos apply without resetting the store. */
 function withImages(menu: CafeStore["menu"]) {
   return menu.map((m) => ({
     ...m,
-    image:
-      m.image && !m.image.startsWith("/media/menu/") && !m.image.startsWith("/media/cafe/")
-        ? m.image // owner-uploaded custom image
-        : imageForMenuItem(m.name, m.category),
+    image: isCustomMenuImage(m.image) ? m.image : imageForMenuItem(m.name, m.category),
   }));
 }
 
@@ -177,6 +189,10 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     allowAfterHours: Boolean(settings.allowAfterHours),
     hoursStart: settings.hoursStart || CAFE.hoursStart,
     hoursEnd: settings.hoursEnd || CAFE.hoursEnd,
+    hoursEndOverride: canonicalHm(settings.hoursEndOverride || "") || undefined,
+    hoursEndOverrideDate: /^\d{4}-\d{2}-\d{2}$/.test(settings.hoursEndOverrideDate || "")
+      ? settings.hoursEndOverrideDate
+      : undefined,
   };
 }
 
@@ -249,6 +265,16 @@ function higherRoleIds(store: CafeStore, exceptStaffId?: string) {
     .map((s) => s.id);
 }
 
+export function isDineInSession(session: { channel?: string }) {
+  return !session.channel || session.channel === "dine_in";
+}
+
+function deskStaffIds(store: CafeStore) {
+  return store.staff
+    .filter((s) => s.active && (s.role === "owner" || s.role === "reception"))
+    .map((s) => s.id);
+}
+
 function pushStaffAlert(
   store: CafeStore,
   alert: Omit<StaffAlert, "id" | "createdAt" | "readByStaffIds">,
@@ -266,8 +292,107 @@ function pushStaffAlert(
   store.staffAlerts = store.staffAlerts.slice(0, 200);
 }
 
+/** Guest orders still waiting for a waiter are not on the bill, and cannot be approved once the table is no longer open. */
+function cancelUnacceptedOrders(session: TableSession, now: string, reason: string) {
+  let cancelled = 0;
+  session.orders = session.orders.map((o) => {
+    if (o.status !== "pending_approval") return o;
+    cancelled += 1;
+    return {
+      ...o,
+      status: "cancelled" as const,
+      rejectReason: reason,
+      updatedAt: now,
+    };
+  });
+  return cancelled;
+}
+
+function stillAwaitingApproval(session: TableSession) {
+  return session.status === "active" && isDineInSession(session) && !session.billRequestedAt;
+}
+
+/** Drop a same-night extension once that service date has ended, and close leftover tables after the grace period. */
+async function sweepClosingState(store: CafeStore) {
+  const now = new Date();
+  let dirty = false;
+  const eff = effectiveClose(store.settings, now);
+  if (
+    store.settings.hoursEndOverrideDate &&
+    store.settings.hoursEndOverrideDate !== eff.serviceDate
+  ) {
+    store.settings.hoursEndOverride = undefined;
+    store.settings.hoursEndOverrideDate = undefined;
+    dirty = true;
+  }
+
+  const status = getOrderingStatus(store.settings, now);
+  const open = store.sessions.filter(
+    (s) =>
+      (s.status === "active" || s.status === "billing") && isDineInSession(s),
+  );
+  const openingMs = currentOpeningMs(status.hoursStart, now);
+  const due = store.settings.allowAfterHours
+    ? []
+    : status.pastGrace
+      ? open
+      : status.withinHours
+        ? open.filter((s) => Date.parse(s.createdAt) < openingMs)
+        : [];
+  if (due.length) {
+    const iso = now.toISOString();
+    for (const session of due) {
+      const hasBill = billableOrders(session.orders).length > 0;
+      session.status = "closed";
+      session.autoClosedAt = iso;
+      session.cart = [];
+      session.updatedAt = iso;
+      if (hasBill && !session.paidAt) {
+        if (!session.billGeneratedAt) session.billGeneratedAt = iso;
+        if (!session.billNumber) session.billNumber = store.settings.nextBillNumber++;
+        session.settlementPending = true;
+      }
+    }
+    store.auditLog.unshift({
+      id: randomUUID(),
+      at: iso,
+      actor: "system",
+      action: "tables_auto_closed",
+      detail: `${due.length} table${due.length === 1 ? "" : "s"} closed after the 30-minute grace period`,
+    });
+    store.auditLog = store.auditLog.slice(0, 500);
+    dirty = true;
+  }
+
+  const iso = now.toISOString();
+  let stale = 0;
+  for (const session of store.sessions) {
+    if (stillAwaitingApproval(session)) continue;
+    stale += cancelUnacceptedOrders(
+      session,
+      iso,
+      "Left off the bill — not accepted before the table closed",
+    );
+  }
+  if (stale) {
+    store.auditLog.unshift({
+      id: randomUUID(),
+      at: iso,
+      actor: "system",
+      action: "stale_approvals_cleared",
+      detail: `${stale} unaccepted order${stale === 1 ? "" : "s"} cleared from closed tables`,
+    });
+    store.auditLog = store.auditLog.slice(0, 500);
+    dirty = true;
+  }
+
+  if (dirty) await persist();
+}
+
 export async function getStore(): Promise<CafeStore> {
-  return await loadStore();
+  const store = await loadStore();
+  await sweepClosingState(store);
+  return store;
 }
 
 export async function resetStore() {
@@ -298,7 +423,7 @@ export async function getTables() {
 
 export async function getActiveSessionForTable(tableId: string) {
   return (await loadStore()).sessions.find(
-    (s) => s.tableId === tableId && s.status === "active",
+    (s) => s.tableId === tableId && s.status === "active" && isDineInSession(s),
   );
 }
 
@@ -344,7 +469,7 @@ export async function joinOrCreateSession(input: {
   await ensureLoyalty(phone, displayName);
 
   let session = store.sessions.find(
-    (s) => s.tableId === input.tableId && s.status === "active",
+    (s) => s.tableId === input.tableId && s.status === "active" && isDineInSession(s),
   );
 
   if (!session) {
@@ -354,6 +479,7 @@ export async function joinOrCreateSession(input: {
     session = {
       id: randomUUID(),
       tableId: input.tableId,
+      channel: "dine_in",
       groupCode: generateGroupCode(),
       status: "active",
       hostMemberId: memberId,
@@ -539,7 +665,7 @@ export async function staffTakeOrder(
   });
 
   let session = store.sessions.find(
-    (s) => s.tableId === tableId && s.status === "active",
+    (s) => s.tableId === tableId && s.status === "active" && isDineInSession(s),
   );
   let memberId: string;
 
@@ -548,6 +674,7 @@ export async function staffTakeOrder(
     session = {
       id: randomUUID(),
       tableId,
+      channel: "dine_in",
       groupCode: generateGroupCode(),
       status: "active",
       hostMemberId: memberId,
@@ -609,6 +736,7 @@ export async function staffTakeOrder(
     status: "queued" as const,
     tokenNumber,
     orderedByMemberId: memberId,
+    tableId: session.tableId,
     takenByStaffId: staffUser?.id,
     takenByStaffName: staffUser?.name || actor,
     assignedWaiterId: assignedWaiterId || undefined,
@@ -653,6 +781,226 @@ export async function staffTakeOrder(
   return { session, tokenNumber, items: newItems };
 }
 
+const DESK_CHANNEL_LABEL: Record<Exclude<OrderChannel, "dine_in">, string> = {
+  takeaway: "Takeaway",
+  swiggy: "Swiggy",
+  zomato: "Zomato",
+};
+
+/** Reception logs a Swiggy, Zomato, or counter takeaway order. It is not a floor table. */
+export async function createOnlineOrder(
+  channel: Exclude<OrderChannel, "dine_in">,
+  drafts: StaffOrderDraft[],
+  actor: string,
+  guest: { name: string; phone?: string; externalOrderId?: string; note?: string },
+) {
+  if (!drafts.length) throw new Error("Add at least one item");
+  if (channel !== "takeaway" && channel !== "swiggy" && channel !== "zomato") {
+    throw new Error("Choose Swiggy, Zomato, or Takeaway");
+  }
+  const store = await loadStore();
+  assertAcceptingOrders(store.settings);
+  const guestName = guest.name.trim();
+  if (!guestName) throw new Error("Guest name is required");
+
+  const label = DESK_CHANNEL_LABEL[channel];
+  const externalOrderId = guest.externalOrderId?.trim() || "";
+  if (channel !== "takeaway" && !externalOrderId) {
+    throw new Error(`Enter the ${label} order number`);
+  }
+  if (
+    externalOrderId &&
+    store.sessions.some(
+      (s) =>
+        s.channel === channel &&
+        s.externalOrderId?.toLowerCase() === externalOrderId.toLowerCase() &&
+        (s.status === "active" || s.status === "billing"),
+    )
+  ) {
+    throw new Error(`That ${label} order is already open`);
+  }
+
+  let phone: string | undefined;
+  if (channel === "takeaway" || guest.phone?.trim()) {
+    phone = requirePhone(guest.phone || "");
+    await ensureLoyalty(phone, guestName);
+  }
+
+  const staffUser = staffByEmail(store, actor);
+  const now = new Date().toISOString();
+  const prepared = drafts.map((draft) => {
+    const menu = store.menu.find((m) => m.id === draft.menuItemId);
+    if (!menu || !menu.available) throw new Error("That item is not available");
+    const qty = Math.min(99, Math.max(1, Math.floor(Number(draft.qty) || 1)));
+    const variant = draft.variantId
+      ? menu.variants?.find((v) => v.id === draft.variantId)
+      : undefined;
+    if (menu.variants?.length && !variant) {
+      throw new Error(`Choose a type for ${menu.name}`);
+    }
+    const choices: Record<string, string> = {};
+    for (const choice of menu.choices || []) {
+      const picked = draft.choices?.[choice.id];
+      choices[choice.id] =
+        picked && choice.options.includes(picked) ? picked : choice.options[0];
+    }
+    return {
+      menuItemId: menu.id,
+      name: menu.name,
+      variantLabel: variant?.label,
+      choices: Object.keys(choices).length ? choices : undefined,
+      notes: draft.notes?.trim() || undefined,
+      unitPrice: variant?.price ?? menu.price,
+      qty,
+    };
+  });
+
+  const memberId = randomUUID();
+  const note = guest.note?.trim().slice(0, 200) || undefined;
+  const session: TableSession = {
+    id: randomUUID(),
+    tableId: "online",
+    channel,
+    externalOrderId: externalOrderId || undefined,
+    orderNote: note,
+    groupCode: generateGroupCode(),
+    status: "active",
+    hostMemberId: memberId,
+    members: [
+      {
+        id: memberId,
+        displayName: guestName,
+        phone,
+        joinedAt: now,
+        isHost: true,
+      },
+    ],
+    cart: [],
+    orders: [],
+    batches: [],
+    serviceChargeEnabled: false,
+    discountPercent: 0,
+    discountAmount: 0,
+    loyaltyPhone: phone,
+    loyaltyPointsRedeemed: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const tokenNumber = store.settings.nextTokenNumber++;
+  const newItems: OrderLine[] = prepared.map((line) => ({
+    id: randomUUID(),
+    ...line,
+    status: "queued" as const,
+    tokenNumber,
+    orderedByMemberId: memberId,
+    tableId: "online",
+    takenByStaffId: staffUser?.id,
+    takenByStaffName: staffUser?.name || actor,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  session.orders.push(...newItems);
+  session.batches.push({
+    id: randomUUID(),
+    sessionId: session.id,
+    tokenNumber,
+    createdAt: now,
+    itemIds: newItems.map((item) => item.id),
+  });
+  store.sessions.unshift(session);
+
+  const actorName = staffUser?.name || actor;
+  pushStaffAlert(store, {
+    type: "online_order",
+    tableId: "online",
+    tableLabel: label,
+    actorStaffId: staffUser?.id || "desk",
+    actorName,
+    recipientStaffIds: deskStaffIds(store),
+    message: externalOrderId
+      ? `${actorName} logged a ${label} order for ${guestName} (${externalOrderId}). Token #${tokenNumber}.`
+      : `${actorName} logged a takeaway for ${guestName}. Token #${tokenNumber}.`,
+  });
+  await audit(
+    actor,
+    "online_order",
+    `${label} token ${tokenNumber}${externalOrderId ? ` ${externalOrderId}` : ""}`,
+  );
+  await persist();
+  return { session, tokenNumber, items: newItems };
+}
+
+function mustDeskSession(session: TableSession) {
+  if (isDineInSession(session)) throw new Error("That order is on a table");
+  if (session.paidAt) throw new Error("That order is already closed");
+  return session;
+}
+
+export async function cancelOnlineOrder(sessionId: string, actor: string, reason: string) {
+  const trimmed = reason.trim();
+  if (trimmed.length < 3) {
+    throw new Error("Enter a reason (at least 3 characters) before cancelling");
+  }
+  const session = mustDeskSession(await mustSession(sessionId));
+  if (session.billGeneratedAt && session.channel === "takeaway") {
+    throw new Error("Bill already generated — settle or force-close instead");
+  }
+  const now = new Date().toISOString();
+  // Cancel anytime until handed over or paid, including while the kitchen is preparing.
+  for (const line of session.orders) {
+    if (line.status !== "cancelled" && line.status !== "rejected") {
+      line.status = "cancelled";
+      line.rejectReason = trimmed;
+      line.updatedAt = now;
+    }
+  }
+  session.status = "closed";
+  session.cart = [];
+  session.cancelReason = trimmed;
+  session.cancelledAt = now;
+  session.cancelledBy = actor;
+  session.updatedAt = now;
+  const label = DESK_CHANNEL_LABEL[session.channel as Exclude<OrderChannel, "dine_in">] || "Online";
+  await audit(
+    actor,
+    "online_order_cancelled",
+    `${label} ${session.externalOrderId || session.id}: ${trimmed}`,
+  );
+  await persist();
+  return session;
+}
+
+export async function handOverOnlineOrder(sessionId: string, actor: string) {
+  const session = mustDeskSession(await mustSession(sessionId));
+  if (session.channel !== "swiggy" && session.channel !== "zomato") {
+    throw new Error("Takeaway is paid at the counter");
+  }
+  const stillCooking = session.orders.some((line) =>
+    ["pending_approval", "queued", "preparing"].includes(line.status),
+  );
+  if (stillCooking) throw new Error("Kitchen is still preparing this order");
+  const ready = session.orders.filter((line) => line.status === "ready" || line.status === "served");
+  if (!ready.length) throw new Error("Nothing is ready to hand over");
+  const now = new Date().toISOString();
+  for (const line of session.orders) {
+    if (line.status === "ready") {
+      line.status = "served";
+      line.updatedAt = now;
+    }
+  }
+  const store = await loadStore();
+  session.status = "closed";
+  session.paidAt = now;
+  session.updatedAt = now;
+  if (!session.billGeneratedAt) session.billGeneratedAt = now;
+  if (!session.billNumber) session.billNumber = store.settings.nextBillNumber++;
+  const label = DESK_CHANNEL_LABEL[session.channel];
+  await audit(actor, "online_order_handed_over", `${label} ${session.externalOrderId || session.id}`);
+  await persist();
+  return session;
+}
+
 export async function placeOrder(sessionId: string, memberId: string) {
   const session = await mustSession(sessionId);
   if (session.status === "billing" || session.billGeneratedAt) {
@@ -679,6 +1027,7 @@ export async function placeOrder(sessionId: string, memberId: string) {
     status: "pending_approval",
     tokenNumber,
     orderedByMemberId: memberId,
+    tableId: session.tableId,
     createdAt: now,
     updatedAt: now,
   }));
@@ -715,17 +1064,11 @@ export async function requestBill(sessionId: string, memberId: string) {
   const now = new Date().toISOString();
   // Unaccepted items stay off the bill. Accepted kitchen orders stay on it,
   // even if they are not served yet.
-  let cancelledPending = 0;
-  session.orders = session.orders.map((o) => {
-    if (o.status !== "pending_approval") return o;
-    cancelledPending += 1;
-    return {
-      ...o,
-      status: "cancelled" as const,
-      rejectReason: "Left off the bill — not accepted before bill request",
-      updatedAt: now,
-    };
-  });
+  const cancelledPending = cancelUnacceptedOrders(
+    session,
+    now,
+    "Left off the bill — not accepted before bill request",
+  );
 
   const billedCount = session.orders.filter(
     (o) => !["pending_approval", "rejected", "cancelled"].includes(o.status),
@@ -855,6 +1198,36 @@ export async function setCafeOrderingControls(
   return getOrderingStatus(store.settings);
 }
 
+/** Owner / reception: push tonight's close later. Standing hours are unchanged. */
+export async function extendCafeHours(hoursEnd: string, actor: string) {
+  const store = await loadStore();
+  const staff = store.staff.find(
+    (s) => s.email.toLowerCase() === String(actor || "").toLowerCase() && s.active,
+  );
+  if (!staff || (staff.role !== "owner" && staff.role !== "reception")) {
+    throw new Error("Only the owner or reception can extend cafe hours");
+  }
+  const status = getOrderingStatus(store.settings);
+  if (!status.closingSoon) {
+    throw new Error("Cafe hours can only be extended in the last 30 minutes before closing");
+  }
+  const check = validateHoursExtension(store.settings, hoursEnd);
+  if (!check.ok) throw new Error(check.reason);
+  store.settings.hoursEndOverrideDate = check.serviceDate;
+  store.settings.hoursEndOverride = check.end;
+  store.settings.allowAfterHours = false;
+  await audit(
+    actor,
+    "hours_extended",
+    JSON.stringify({
+      serviceDate: check.serviceDate,
+      hoursEnd: check.end,
+    }),
+  );
+  await persist();
+  return getOrderingStatus(store.settings);
+}
+
 export async function updateBilling(
   sessionId: string,
   patch: Partial<
@@ -901,6 +1274,11 @@ export async function generateBill(sessionId: string, actor: string) {
     throw new Error("No items to bill yet");
   }
   const now = new Date().toISOString();
+  cancelUnacceptedOrders(
+    session,
+    now,
+    "Left off the bill — not accepted before bill request",
+  );
   const staffUser = staffByEmail(store, actor);
   if (!session.billRequestedAt) {
     session.billRequestedAt = now;
@@ -975,6 +1353,7 @@ async function finalizePaidSession(
   session.paidAt = now;
   session.paymentMethod = paymentMethod;
   session.paymentAwaitingApproval = false;
+  session.settlementPending = false;
   if (!session.billNumber) session.billNumber = store.settings.nextBillNumber++;
   if (!session.billGeneratedAt) session.billGeneratedAt = now;
   session.updatedAt = now;
@@ -1006,12 +1385,174 @@ export async function forceCloseSession(sessionId: string, actor: string, reason
   }
   const session = await mustSession(sessionId);
   const now = new Date().toISOString();
+  cancelUnacceptedOrders(
+    session,
+    now,
+    "Left off the bill — not accepted before the table closed",
+  );
   session.status = "closed";
   session.forceClosedAt = now;
   session.forceCloseReason = trimmed;
   session.forceClosedBy = actor;
   session.updatedAt = now;
   await audit(actor, "force_close", `${session.tableId}: ${trimmed}`);
+  await persist();
+  return session;
+}
+
+const TABLE_SWITCH_ROLES = new Set(["owner", "reception", "waiter"]);
+const MAX_SWITCH_REASON = 280;
+
+function requireSwitchReason(reason: string) {
+  const trimmed = reason.trim().replace(/\s+/g, " ");
+  if (trimmed.length < 3) {
+    throw new Error("Please mention the reason for the discomfort (at least 3 characters)");
+  }
+  if (trimmed.length > MAX_SWITCH_REASON) {
+    throw new Error(`Reason must be ${MAX_SWITCH_REASON} characters or fewer`);
+  }
+  return trimmed;
+}
+
+function assertCanSwitchTables(store: CafeStore, actor: string) {
+  const staff = staffByEmail(store, actor);
+  if (!staff || !staff.active || !TABLE_SWITCH_ROLES.has(staff.role)) {
+    throw new Error("Only waiter, reception, or owner can switch tables");
+  }
+  return staff;
+}
+
+function isTableOccupied(store: CafeStore, tableId: string, exceptSessionId?: string) {
+  return store.sessions.some(
+    (s) =>
+      s.tableId === tableId &&
+      (s.status === "active" || s.status === "billing") &&
+      s.id !== exceptSessionId,
+  );
+}
+
+export async function requestTableSwitch(
+  sessionId: string,
+  memberId: string,
+  reason: string,
+) {
+  const session = await mustSession(sessionId);
+  const member = session.members.find((m) => m.id === memberId);
+  if (!member) throw new Error("Not a session member");
+  if (session.status !== "active") {
+    throw new Error("Table switch is only available while the table is open");
+  }
+  if (session.billGeneratedAt) {
+    throw new Error("Bill already generated — table switch is closed");
+  }
+  const trimmed = requireSwitchReason(reason);
+  const store = await loadStore();
+  const now = new Date().toISOString();
+  session.tableSwitchRequestedAt = now;
+  session.tableSwitchRequestedByMemberId = member.id;
+  session.tableSwitchRequestedByName = member.displayName;
+  session.tableSwitchReason = trimmed;
+  session.updatedAt = now;
+
+  const table = store.tables.find((t) => t.id === session.tableId);
+  const label = table ? tableShortLabel(table) : session.tableId.replace(/^lunar-/, "");
+  const recipients = new Set(higherRoleIds(store));
+  for (const s of store.staff) {
+    if (s.active && s.role === "waiter") recipients.add(s.id);
+  }
+  if (table?.assignedWaiterId) recipients.add(table.assignedWaiterId);
+  pushStaffAlert(store, {
+    type: "table_switch_request",
+    tableId: session.tableId,
+    tableLabel: label,
+    actorStaffId: member.id,
+    actorName: member.displayName,
+    recipientStaffIds: [...recipients],
+    message: `${member.displayName} requested a table switch from Table ${label}: “${trimmed}”`,
+  });
+
+  await audit(member.displayName, "table_switch_requested", `${session.tableId}: ${trimmed}`);
+  await persist();
+  return session;
+}
+
+export async function rejectTableSwitch(sessionId: string, actor: string) {
+  const store = await loadStore();
+  assertCanSwitchTables(store, actor);
+  const session = await mustSession(sessionId);
+  if (!session.tableSwitchRequestedAt) {
+    throw new Error("No pending table switch request");
+  }
+  const from = session.tableId;
+  session.tableSwitchRequestedAt = undefined;
+  session.tableSwitchRequestedByMemberId = undefined;
+  session.tableSwitchRequestedByName = undefined;
+  session.tableSwitchReason = undefined;
+  session.updatedAt = new Date().toISOString();
+  await audit(actor, "table_switch_rejected", from);
+  await persist();
+  return session;
+}
+
+export async function approveTableSwitch(
+  sessionId: string,
+  toTableId: string,
+  actor: string,
+  reason?: string,
+) {
+  const store = await loadStore();
+  const staff = assertCanSwitchTables(store, actor);
+  const session = await mustSession(sessionId);
+  if (session.status !== "active") {
+    throw new Error("Table switch is only available while the table is open");
+  }
+  if (session.billGeneratedAt) {
+    throw new Error("Bill already generated — table switch is closed");
+  }
+
+  const target = store.tables.find((t) => t.id === toTableId);
+  if (!target) throw new Error("Destination table not found");
+  if (toTableId === session.tableId) {
+    throw new Error("Choose a different table");
+  }
+  if (isTableOccupied(store, toTableId, session.id)) {
+    throw new Error("That table already has an open session");
+  }
+
+  const fromGuestRequest = Boolean(session.tableSwitchRequestedAt);
+  const switchReason = fromGuestRequest
+    ? requireSwitchReason(session.tableSwitchReason || reason || "")
+    : requireSwitchReason(reason || "");
+
+  const fromTableId = session.tableId;
+  const now = new Date().toISOString();
+
+  for (const order of session.orders) {
+    if (!order.tableId) order.tableId = fromTableId;
+  }
+
+  session.tableSwitches = session.tableSwitches || [];
+  session.tableSwitches.push({
+    fromTableId,
+    toTableId,
+    reason: switchReason,
+    requestedBy: session.tableSwitchRequestedByName,
+    approvedBy: staff.name || actor,
+    at: now,
+  });
+
+  session.tableId = toTableId;
+  session.tableSwitchRequestedAt = undefined;
+  session.tableSwitchRequestedByMemberId = undefined;
+  session.tableSwitchRequestedByName = undefined;
+  session.tableSwitchReason = undefined;
+  session.updatedAt = now;
+
+  await audit(
+    actor,
+    "table_switched",
+    `${fromTableId} -> ${toTableId}: ${switchReason}`,
+  );
   await persist();
   return session;
 }
@@ -1146,6 +1687,17 @@ export async function ensureLoyalty(phone: string, name: string): Promise<Loyalt
   return member;
 }
 
+export async function leaveLoyalty(phone: string) {
+  const store = await loadStore();
+  const normalized = requirePhone(phone);
+  const index = store.loyalty.findIndex((l) => normalizePhone(l.phone) === normalized);
+  if (index < 0) throw new Error("No rewards profile for that number");
+  const [member] = store.loyalty.splice(index, 1);
+  await audit("guest", "loyalty_left", normalized);
+  await persist();
+  return { phone: member.phone, name: member.name };
+}
+
 export type { GuestVisit, VisitItem };
 
 function sessionMatchesPhone(session: TableSession, phone: string): boolean {
@@ -1272,12 +1824,28 @@ export async function moderateFeedback(
 
 export async function loginStaff(email: string, password: string) {
   const store = await loadStore();
+  const wanted = String(email || "").trim().toLowerCase();
   const user = store.staff.find(
-    (s) => s.email === email && s.password === password && s.active,
+    (s) => s.email.toLowerCase() === wanted && s.password === password && s.active,
   );
   if (!user) throw new Error("Invalid credentials");
   const { password: _p, ...safe } = user;
   return safe;
+}
+
+export async function changeOwnPassword(email: string, current: string, next: string) {
+  const store = await loadStore();
+  const wanted = String(email || "").trim().toLowerCase();
+  const user = store.staff.find((s) => s.email.toLowerCase() === wanted && s.active);
+  if (!user || user.password !== String(current || "")) {
+    throw new Error("Current password is wrong");
+  }
+  const password = String(next || "");
+  if (password.length < 6) throw new Error("Password must be at least 6 characters");
+  if (password === user.password) throw new Error("Choose a different password");
+  user.password = password;
+  await audit(user.email, "password_changed", user.email);
+  await persist();
 }
 
 export async function createStaffUser(
@@ -1573,19 +2141,35 @@ export async function getStats() {
   const peakDay = Object.entries(byDay).sort((a, b) => b[1] - a[1])[0] || null;
   const peakHour = Object.entries(byHour).sort((a, b) => b[1] - a[1])[0] || null;
 
-  const openTables = store.sessions.filter(
+  const open = store.sessions.filter(
     (s) => s.status === "active" || s.status === "billing",
-  ).length;
-  const pendingApprovals = store.sessions.reduce(
-    (n, s) =>
-      n + s.orders.filter((o) => o.status === "pending_approval").length,
-    0,
   );
+  const openTables = open.filter(isDineInSession).length;
+  const openOnline = open.filter(
+    (s) => s.channel === "swiggy" || s.channel === "zomato",
+  ).length;
+  const openTakeaway = open.filter((s) => s.channel === "takeaway").length;
+  const pendingApprovals = store.sessions.reduce((n, s) => {
+    if (!stillAwaitingApproval(s)) return n;
+    return n + s.orders.filter((o) => o.status === "pending_approval").length;
+  }, 0);
+
+  const channelCounts = { dine_in: 0, takeaway: 0, swiggy: 0, zomato: 0 };
+  for (const s of paid) {
+    const channel =
+      s.channel === "takeaway" || s.channel === "swiggy" || s.channel === "zomato"
+        ? s.channel
+        : "dine_in";
+    channelCounts[channel] += 1;
+  }
 
   return {
     openTables,
+    openOnline,
+    openTakeaway,
     pendingApprovals,
     paidBills: paid.length,
+    byChannel: channelCounts,
     byHour,
     byDay,
     topItems,

@@ -9,6 +9,7 @@ import {
   leaveSession,
   placeOrder,
   requestBill,
+  requestTableSwitch,
   submitGuestPayment,
   updateCart,
 } from "@/lib/store";
@@ -80,6 +81,14 @@ export async function POST(
     if (action === "request_bill") {
       const result = await requestBill(id, body.memberId);
       return NextResponse.json(result);
+    }
+    if (action === "request_table_switch") {
+      const session = await requestTableSwitch(
+        id,
+        body.memberId,
+        String(body.reason || ""),
+      );
+      return NextResponse.json({ session });
     }
     if (action === "submit_payment") {
       const session = await submitGuestPayment(id, body.memberId);

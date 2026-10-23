@@ -3,13 +3,15 @@ import { GuestTableBar } from "./GuestTableBar";
 import { SiteFooter, SiteHeader } from "./SiteHeader";
 import { Reveal } from "./Reveal";
 import { LunarSky } from "./LunarSky";
+import { SiteExtras } from "./SiteExtras";
 
 export function PublicShell({ children }: { children: React.ReactNode }) {
   return (
     <>
+      <SiteExtras />
       <SiteHeader />
       <GuestTableBar />
-      {children}
+      <main id="content">{children}</main>
       <SiteFooter />
     </>
   );
